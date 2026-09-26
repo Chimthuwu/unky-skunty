@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emberwrath Chronicle — Tactical RPG Prototype</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: #06080f;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    font-family: monospace;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+    border: 2px solid #1c2440;
+    box-shadow: 0 0 0 4px #0a0e1a, 0 0 40px rgba(40,80,200,0.15);
+  }
+  #hint {
+    color: #3a4468;
+    font-size: 11px;
+    margin-top: 8px;
+    letter-spacing: 1px;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hint">ARROWS/WASD MOVE · Z/ENTER CONFIRM · X CANCEL · C MENU · E END TURN · M MUTE · ` DEBUG</div>
+<script src="js/core/utils.js"></script>
+<script src="js/core/config.js"></script>
+<script src="js/data/terrain.js"></script>
+<script src="js/data/weapons.js"></script>
+<script src="js/data/items.js"></script>
+<script src="js/data/classes.js"></script>
+<script src="js/data/characters.js"></script>
+<script src="js/data/chapter1.js"></script>
+<script src="js/game/units.js"></script>
+<script src="js/game/map.js"></script>
+<script src="js/game/combat.js"></script>
+<script src="js/game/ai.js"></script>
+<script src="js/game/save.js"></script>
+<script src="js/game/engine.js"></script>
+<script src="js/gfx/font.js"></script>
+<script src="js/gfx/charart.js"></script>
+<script src="js/gfx/tiles.js"></script>
+<script src="js/gfx/audio.js"></script>
+<script src="js/gfx/input.js"></script>
+<script src="js/gfx/ui.js"></script>
+<script src="js/gfx/dialogue.js"></script>
+<script src="js/gfx/battlescene.js"></script>
+<script src="js/gfx/levelup.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# --- credentials: never commit ---
+Token.txt
+token.txt
+*.token
+.env
+.env.*
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# --- node (tests only; game has no deps) ---
+node_modules/
+npm-debug.log*
