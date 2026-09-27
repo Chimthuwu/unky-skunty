@@ -181,6 +181,13 @@ const Aftermath = (() => {
       update, draw,
       get phase() { return phase; },
       get done() { return finished; },
+      /* Cancel may only skip the tail. The two statements and the
+         glitch are the point of dying here — a single stray Escape
+         used to fast-forward the whole thing and drop you straight
+         back into the corridor without ever seeing them. The board
+         already carries a timeout, so nothing here can trap anyone;
+         this is about not eating the content, not about mercy. */
+      get skippable() { return phase === 'board' || phase === 'invert'; },
       get inverted() { return inverted; },
       get boardMoves() { return board.movesMade; },
       get elapsed() { return total; },

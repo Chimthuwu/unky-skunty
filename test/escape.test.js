@@ -229,6 +229,31 @@ console.log('\ndeath never returns to the title, and later deaths alternate');
     'state=' + d2.state + ' round ' + d2.round);
 }
 
+console.log('\na stray cancel cannot eat the death sequence');
+{
+  /* Cancel is bound to X, Escape and Backspace, and the old death card
+     used to tell the player to press X — so it is very easy to skip the
+     cutscene by accident. The statements are the point of dying here. */
+  setInput('() => false', '() => false');
+  for (let i = 0; i < 20000; i++) { if (dbg().state === 'caught') break; frame(); }
+  for (let i = 0; i < 200; i++) { if (dbg().state === 'aftermath') break; frame(); }
+  check('the cutscene is running', dbg().state === 'aftermath', 'state=' + dbg().state);
+
+  /* mash cancel through every early phase */
+  const phases = new Set();
+  for (let i = 0; i < 1200; i++) {
+    if (i % 3 === 0) { press('cancel'); frame(); setInput('() => false', '() => false'); }
+    else frame();
+    const p = vm.runInContext('__scr._phase()', sandbox);
+    if (p) phases.add(p);
+    if (dbg().state === 'playing') break;
+  }
+  check('cancel alone never skips the JavaScript beat', phases.has('js'),
+    'phases seen: ' + Array.from(phases).join(' -> '));
+  check('nor the Linux beat', phases.has('linux'),
+    'phases seen: ' + Array.from(phases).join(' -> '));
+}
+
 console.log('\nrotations sometimes run inverted');
 {
   /* re-roll a few thousand times rather than playing 400 rounds */

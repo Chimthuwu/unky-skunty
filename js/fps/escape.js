@@ -866,8 +866,11 @@ const EscapeMode = (() => {
       if (state === 'aftermath') {
         if (!aftermath) aftermath = Aftermath.create(Config.SCREEN_W, Config.SCREEN_H);
         aftermath.update(dt, Input);
-        /* cancel skips the cutscene — nobody should be trapped in one */
-        if (Input.pressed('cancel') && aftermath.phase !== 'done') {
+        /* Cancel skips the tail of the cutscene — the board and the
+           inversion — but never the statements. It used to fast-forward
+           from any phase, which meant one stray Escape ate the whole
+           sequence and you never saw JAVA SCRIPT at all. */
+        if (Input.pressed('cancel') && aftermath.skippable) {
           while (!aftermath.done) aftermath.update(200, { down: () => false, pressed: () => false });
         }
         if (aftermath.done) {
