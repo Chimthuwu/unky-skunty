@@ -481,8 +481,15 @@ const EscapeMode = (() => {
         g.restore();
       }
 
-      /* muzzle flash + gun */
-      if (shotFlash > 0) { g.fillStyle = 'rgba(255,220,140,' + (shotFlash / 120 * 0.5) + ')'; g.fillRect(0, 0, SW, SH); }
+      /* muzzle flash + gun — a small local glow near the barrel, NOT a
+         full-screen flash: even mashing fire can't produce a screen-wide
+         strobe this way, however fast the flashes repeat */
+      if (shotFlash > 0) {
+        g.fillStyle = 'rgba(255,220,140,' + (shotFlash / 120 * 0.7) + ')';
+        g.beginPath();
+        g.arc(SW / 2, SH - 42, 16 * (shotFlash / 120), 0, Math.PI * 2);
+        g.fill();
+      }
       g.fillStyle = '#302840';
       g.fillRect(SW / 2 - 22, SH - 26, 44, 26);
       g.fillStyle = '#4a3f60';
@@ -586,15 +593,23 @@ const EscapeMode = (() => {
         g.restore();
       }
 
-      /* jumpscare: a nightmare just spotted you — corrupted text burst */
+      /* jumpscare: a nightmare just spotted you — corrupted text burst.
+         Deliberately NOT a strobe: one smooth fade in/hold/out, a single
+         steady tint, no per-frame random flashing or color-alternation —
+         those can trigger photosensitive seizures. */
       if (spotFlash > 0) {
-        const a = Math.min(1, spotFlash / 250);
+        const total = 1100, elapsed = total - spotFlash;
+        let a;
+        if (elapsed < 150) a = elapsed / 150;
+        else if (elapsed > total - 400) a = (total - elapsed) / 400;
+        else a = 1;
+        a = Math.max(0, Math.min(1, a));
         g.save();
+        g.globalAlpha = a * 0.85;
+        g.fillStyle = 'rgba(120,0,10,0.22)';
+        g.fillRect(0, 0, SW, SH);
         g.globalAlpha = a;
-        if (Math.random() < 0.6) { g.fillStyle = 'rgba(255,0,20,0.18)'; g.fillRect(0, 0, SW, SH); }
-        const jx = Math.random() * 6 - 3, jy = Math.random() * 6 - 3;
-        Font.drawCentered(g, 'fire embl3333333//}', SW / 2 + jx, SH / 2 - 6 + jy, '#ff2040', 2);
-        Font.drawCentered(g, 'fire embl3333333//}', SW / 2 - jx, SH / 2 - 6 - jy, '#40ffe0', 2);
+        Font.drawCentered(g, 'fire embl3333333//}', SW / 2, SH / 2 - 6, '#ff4050', 2);
         g.restore();
       }
 
