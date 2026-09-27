@@ -55,6 +55,123 @@ const EscapeMode = (() => {
     return true;
   }
 
+  /* ---------------- grid-locked movement (Fire Emblem style) ----------------
+     Enemies do not free-steer. Each one commits to a single step from the
+     centre of the cell it occupies to the centre of an orthogonally
+     adjacent cell, and only picks the next cell once it has arrived —
+     the way a tactics unit walks one square of its path per move. Four
+     directions only, no diagonals, which is what makes it read as Fire
+     Ember rather than as a generic chase. */
+
+  const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  /* Scratch buffers for the search. The grid is tiny and a full BFS per
+     enemy every few hundred ms is nothing, so there is no need for
+     anything clever — but these are reused rather than reallocated so a
+     horde doesn't churn the GC every path tick. */
+  const _bfsPrev = new Int32Array(W * H);
+  const _bfsFirst = new Int32Array(W * H);
+  const _bfsSeen = new Int32Array(W * H);
+  const _bfsQueue = new Int32Array(W * H);
+  let _bfsStamp = 0;
+
+  /* The cell to step onto when walking from (sx,sy) toward (gx,gy), or
+     null if there is no route (or we're already there).
+
+     The first step has to be carried per-node as the search runs. Taking
+     "the first neighbour we happened to expand" instead is wrong: that is
+     just whichever came first in DIRS4 order, and when it happens to be a
+     dead end the unit walks the wrong way, re-paths on arrival, walks back
+     and oscillates in place instead of advancing. */
+  function bfsFirstStep(grid, sx, sy, gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= W || gy >= H) return null;
+    if (sx === gx && sy === gy) return null;
+    const start = sy * W + sx, goal = gy * W + gx;
+    const stamp = ++_bfsStamp;
+    let head = 0, tail = 0;
+    _bfsQueue[tail++] = start;
+    _bfsSeen[start] = stamp;
+    _bfsPrev[start] = -1;
+    _bfsFirst[start] = start;
+    while (head < tail) {
+      const cur = _bfsQueue[head++];
+      const cx = cur % W, cy = (cur / W) | 0;
+      for (let d = 0; d < 4; d++) {
+        const ax = cx + DIRS4[d][0], ay = cy + DIRS4[d][1];
+        if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+        const idx = ay * W + ax;
+        if (_bfsSeen[idx] === stamp) continue;
+        if (grid[ay][ax] === 1) continue;
+        _bfsSeen[idx] = stamp;
+        _bfsPrev[idx] = cur;
+        _bfsFirst[idx] = (cur === start) ? idx : _bfsFirst[cur];
+        if (idx === goal) {
+          const f = _bfsFirst[idx];
+          return { x: f % W, y: (f / W) | 0 };
+        }
+        _bfsQueue[tail++] = idx;
+      }
+    }
+    return null;
+  }
+
+  function isOpenCell(grid, cx, cy) {
+    return cx >= 0 && cy >= 0 && cx < W && cy < H && grid[cy][cx] !== 1;
+  }
+
+  /* A random open orthogonal neighbour, for idle wandering. Falls back to
+     standing still if the unit is boxed in. */
+  function randomStepTarget(grid, cx, cy) {
+    const opts = [];
+    for (let d = 0; d < 4; d++) {
+      const ax = cx + DIRS4[d][0], ay = cy + DIRS4[d][1];
+      if (isOpenCell(grid, ax, ay)) opts.push({ x: ax, y: ay });
+    }
+    if (!opts.length) return null;
+    return opts[(Math.random() * opts.length) | 0];
+  }
+
+  /* Give a unit the bookkeeping it needs to walk cell-to-cell. */
+  function makeMover(cx, cy) {
+    return {
+      x: cx + 0.5, y: cy + 0.5,   /* rendered position, interpolated */
+      cx, cy,                        /* cell we last stood on */
+      stepX: cx, stepY: cy,         /* cell being walked toward */
+      stepT: 1,                      /* 0..1 through the current step */
+      moved: false,                  /* set on the frame a step completes */
+    };
+  }
+
+  /* Advance one cell-to-cell step. `chooseNext` is called only once the
+     unit has arrived, and should point stepX/stepY at the next cell (or
+     leave them where they are to mean "hold"). Returns true on any frame
+     where the unit finished a step or changed cell. */
+  function advanceMover(e, dtS, spd, chooseNext) {
+    if (e.stepT >= 1) {
+      /* arrived: commit to the cell we're standing on and pick the next */
+      e.cx = e.stepX; e.cy = e.stepY;
+      e.x = e.cx + 0.5; e.y = e.cy + 0.5;
+      e.moved = true;
+      e.stepT = 0;                 /* MUST reset before choosing, or the
+                                      step completes instantly and the unit
+                                      teleports a cell every frame */
+      chooseNext(e);
+      if (e.stepX === e.cx && e.stepY === e.cy) { e.stepT = 1; return true; }
+    }
+    e.stepT += dtS * spd;           /* one full cell per 1/spd seconds */
+    const fx = e.cx + 0.5, fy = e.cy + 0.5;
+    const tx = e.stepX + 0.5, ty = e.stepY + 0.5;
+    if (e.stepT >= 1) {
+      e.stepT = 1;
+      e.cx = e.stepX; e.cy = e.stepY;
+      e.x = tx; e.y = ty;
+      return true;
+    }
+    e.x = fx + (tx - fx) * e.stepT;
+    e.y = fy + (ty - fy) * e.stepT;
+    return false;
+  }
+
   /* ---------------- procedural bullet billboard ---------------- */
   let bulletCanvas = null;
   function bulletSprite() {
@@ -68,21 +185,74 @@ const EscapeMode = (() => {
     return c;
   }
 
-  /* ---------------- procedural bunny billboard ---------------- */
+  /* ---------------- bunny billboard ----------------
+     Same silhouette as the old cute sprite — two ears, round body, two
+     feet — but stripped of everything that made it read as a toy. All the
+     pink is gone; what is left is matte black with a wet grey rim. The
+     ears don't match each other, the torso is split down the middle by a
+     seam with a gap in it, there are three arms on the left and two on
+     the right, and where the eyes were there is now a single gash. The
+     shape still has to be readable as "bunny" from across a dark field at
+     240x160, so the silhouette is preserved; only the contents are wrong. */
   let bunnyCanvas = null;
   function bunnySprite() {
     if (bunnyCanvas) return bunnyCanvas;
+    const W_B = 32, H_B = 32;
     const c = document.createElement('canvas');
-    c.width = 24; c.height = 24;
+    c.width = W_B; c.height = H_B;
     const g = c.getContext('2d');
-    const p = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
-    p(9, 2, 3, 9, '#f0d8e8'); p(14, 2, 3, 9, '#f0d8e8');
-    p(10, 4, 1, 5, '#e888b0'); p(15, 4, 1, 5, '#e888b0');
-    p(7, 10, 12, 10, '#f8f0f0');
-    p(6, 12, 2, 6, '#f8f0f0'); p(18, 12, 2, 6, '#f8f0f0');
-    p(9, 13, 2, 2, '#181818'); p(14, 13, 2, 2, '#181818');
-    p(11, 16, 3, 2, '#e888b0');
-    p(6, 20, 4, 3, '#e8dcdc'); p(15, 20, 4, 3, '#e8dcdc');
+    const FLESH = '#0e0c12', RIM = '#4a4552', WET = '#b9c2d4';
+
+    /* ears: left is long and straight, right is shorter and kinked */
+    g.fillStyle = FLESH;
+    g.fillRect(9, 1, 3, 11);
+    g.fillRect(20, 4, 3, 7);
+    g.fillRect(18, 10, 4, 2);          /* the kink */
+    g.fillStyle = RIM;
+    g.fillRect(9, 1, 1, 11);
+    g.fillRect(22, 4, 1, 7);
+    g.fillStyle = '#2a1418';            /* hollow inside the ear */
+    g.fillRect(10, 3, 1, 7);
+    g.fillRect(21, 6, 1, 4);
+
+    /* head, tilted slightly off-square */
+    g.fillStyle = FLESH;
+    g.fillRect(8, 11, 16, 9);
+    g.fillStyle = RIM;
+    g.fillRect(8, 11, 16, 1);
+    g.fillRect(8, 11, 1, 9);
+
+    /* the gash where the face should be — one cut, no eyes */
+    g.fillStyle = WET;
+    g.fillRect(11, 15, 10, 1);
+    g.fillStyle = '#2a0a0e';
+    g.fillRect(12, 15, 8, 2);
+
+    /* torso, split by a seam with daylight through it */
+    g.fillStyle = FLESH;
+    g.fillRect(9, 20, 6, 6);
+    g.fillRect(17, 20, 6, 6);
+    g.fillStyle = RIM;
+    g.fillRect(15, 20, 2, 6);
+    g.fillRect(9, 20, 1, 6);
+    g.fillRect(24, 20, 1, 6);
+
+    /* three arms on the left, two on the right */
+    g.fillStyle = FLESH;
+    g.fillRect(5, 20, 4, 2);
+    g.fillRect(4, 23, 4, 2);
+    g.fillRect(6, 26, 3, 2);
+    g.fillRect(23, 21, 5, 2);
+    g.fillRect(24, 25, 4, 2);
+
+    /* legs too long, ending in splayed feet */
+    g.fillStyle = FLESH;
+    g.fillRect(11, 26, 4, 4);
+    g.fillRect(18, 26, 4, 4);
+    g.fillStyle = RIM;
+    g.fillRect(9, 30, 6, 2);
+    g.fillRect(18, 30, 6, 2);
+
     bunnyCanvas = c;
     return c;
   }
@@ -134,14 +304,30 @@ const EscapeMode = (() => {
     return c;
   }
 
+  /* Uncle's chat-log voice: forum-native, grievance-accumulating, and
+     increasingly unhinged as the run goes on. Aimed at the *mechanics* of
+     the behaviour — the filing system, the cadence, the forum posting —
+     rather than at restating anyone's actual statements. Keep these under
+     46 chars; draw() truncates the subtitle at that length. */
   const TAUNTS = [
-    "Wot im talking about ye is England for the English innit.",
-    "I have an air rifle for when this country goes to shit!",
-    "Back in MY day the bunnies knew their place.",
-    "Nothing personal, I'm just VERY edgy.",
-    "Don't look at the door! I said don't look at it!",
-    "You lot are why we can't have nice things.",
+    "certified virgin mentality (source: me)",
+    "touch grass. (the grass is a problem)",
+    "my nephew could route better and he's four",
+    "I have a doctorate in crying",
+    "400 units deployed. none are different",
+    "ratio + you're on camera 2 + I have the gate",
+    "anyway that's the report. edit: wrong report",
+    "named the rabbit after my ex. she is winning",
+    ">>implying I don't out-range you",
+    "I am not the problem. the problem is me",
+    "certified immune to criticism (source: me)",
+    "b/c before you ask: not the flag kind",
+    "#NoMoreSandWars",
+    "Swap to Linux bro <rage emote>",
+    "Don't look at the door! Don't look at it!",
     "I'm not angry, I'm just... culturally passionate.",
+    "the bunnies are unionised now. <cry emote>",
+    "back in MY day the bunnies knew their place",
   ];
 
   /* ---------------- factory ---------------- */
@@ -151,6 +337,35 @@ const EscapeMode = (() => {
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
     const catchRadius = 0.55;
+
+    /* ---- the player can be hurt now ----
+       Everything in this mode wants you dead, so contact has to cost
+       something rather than being an instant loss. I-frames are global
+       rather than per-enemy: a crowd converging on you would otherwise
+       stack their damage in the same few frames and delete you on
+       contact, which is the instant-death behaviour we're moving away
+       from. */
+    const PLAYER_MAX_HP = 100;
+    const HURT_IFRAMES = 650;
+    const BUNNY_DMG = 11, NIGHTMARE_DMG = 17, UNCLE_DMG = 30;
+    let playerHP = PLAYER_MAX_HP;
+    let hurtCooldown = 0;      /* global i-frames, counts down in ms */
+    let hurtFlash = 0;
+
+    function hurtPlayer(amount) {
+      if (hurtCooldown > 0 || state !== 'playing') return false;
+      playerHP = Math.max(0, playerHP - amount);
+      hurtCooldown = HURT_IFRAMES;
+      hurtFlash = 420;
+      if (playerHP <= 0) { state = 'caught'; caughtT = 0; Assets.playSound('openFence', 0.5); }
+      return true;
+    }
+
+    /* Uncle is killable now — he's a proper boss with a health pool, so
+       shooting him is a plan rather than a curiosity. */
+    const UNCLE_MAX_HP = 6;
+    let uncleDead = false;
+    let uncleHurtFlash = 0;
 
     /* every open floor cell, used to scatter bunnies each stage */
     const floorCells = [];
@@ -170,7 +385,10 @@ const EscapeMode = (() => {
         const idx = (Math.random() * pool.length) | 0;
         picked.push(pool.splice(idx, 1)[0]);
       }
-      return picked.map(c => ({ x: c.x, y: c.y, dead: false, wobble: Math.random() * 10 }));
+      /* every bunny is a cell-walker now, not a drifter */
+      return picked.map(c => Object.assign(makeMover(Math.floor(c.x), Math.floor(c.y)), {
+        dead: false, wobble: Math.random() * 10, pathT: 0,
+      }));
     }
 
     let nightmares;
@@ -182,8 +400,8 @@ const EscapeMode = (() => {
         const idx = (Math.random() * pool.length) | 0;
         picked.push(pool.splice(idx, 1)[0]);
       }
-      return picked.map(c => ({
-        x: c.x, y: c.y, dead: false, spotted: false, wobble: Math.random() * 10,
+      return picked.map(c => Object.assign(makeMover(Math.floor(c.x), Math.floor(c.y)), {
+        dead: false, spotted: false, wobble: Math.random() * 10, pathT: 0,
         kind: NIGHTMARE_KINDS[(Math.random() * NIGHTMARE_KINDS.length) | 0],
       }));
     }
@@ -191,7 +409,10 @@ const EscapeMode = (() => {
     function resetRun() {
       px = 2.5; py = 2.5; pa = 0.4;
       stage = 1;
-      uncle = { x: 12.5, y: 8.5, alert: 0, lastSeenX: 12.5, lastSeenY: 8.5 };
+      uncle = Object.assign(makeMover(12, 8), {
+        alert: 0, lastSeenX: 12.5, lastSeenY: 8.5,
+        hp: UNCLE_MAX_HP, pathT: 0,
+      });
       bunnies = spawnBunnies(5 + stage);
       nightmares = spawnNightmares(2);
       bunniesSlain = 0;
@@ -200,6 +421,13 @@ const EscapeMode = (() => {
       stageBanner = 1400;
       nextTaunt = 4000 + Math.random() * 3000;
       spotFlash = 0;
+      drainT = 0; drainLen = 0; drainPeak = 0;
+      drainNext = 6000 + Math.random() * 5000;
+      playerHP = PLAYER_MAX_HP;
+      hurtCooldown = 0; hurtFlash = 0;
+      uncleDead = false; uncleHurtFlash = 0;
+      escapedT = 0;
+      Audio.duckMusic(1);
     }
 
     function nextStage() {
@@ -210,7 +438,7 @@ const EscapeMode = (() => {
       UNCLE_SPD_MULT = 1 + (stage - 1) * 0.08;
     }
 
-    let state = 'menu';   /* menu | playing | caught */
+    let state = 'menu';   /* menu | playing | caught | escaped */
     let t = 0;
     let shotFlash = 0;
     let bunniesSlain = 0;
@@ -221,6 +449,8 @@ const EscapeMode = (() => {
     let tauntText = '', tauntT = 0;
     let UNCLE_SPD_MULT = 1;
     let spotFlash = 0;
+    let drainT = 0, drainLen = 0, drainPeak = 0, drainNext = 6000;
+    let escapedT = 0;
     resetRun();
 
     /* fixed-looking but slightly-off ear positions poking in from the
@@ -241,6 +471,37 @@ const EscapeMode = (() => {
       return Math.sin((phase / 0.06) * Math.PI) * 92;
     }
 
+    /* ---- in-game colour drain ----
+       The world periodically bleaches out and seeps the colour back, on a
+       random cycle rather than a fixed one so it never feels metronomic.
+       Every transition is a slow ramp and the gap between drains is
+       floored: a hard full-screen on/off flip of overall luminance is a
+       known photosensitive-seizure trigger, so there is deliberately no
+       code path here that can snap between coloured and grey in one frame.
+       Caps at ~86% grey and never fully desaturates, which also keeps a
+       little of the ash-orange palette readable as "wrong" rather than
+       just "off". */
+    const DRAIN_IN = 900, DRAIN_HOLD = 1400, DRAIN_OUT = 1100;
+
+    function updateColorDrain(dt) {
+      if (drainT > 0) { drainT = Math.max(0, drainT - dt); return; }
+      if (t < drainNext) return;
+      drainLen = DRAIN_IN + DRAIN_HOLD + DRAIN_OUT;
+      drainT = drainLen;
+      drainPeak = 58 + Math.random() * 28;   /* 58-86% */
+      drainNext = t + drainLen + 9000 + Math.random() * 11000;
+    }
+
+    function colorDrainAmount() {
+      if (drainT <= 0) return 0;
+      const elapsed = drainLen - drainT;
+      let a;
+      if (elapsed < DRAIN_IN) a = elapsed / DRAIN_IN;
+      else if (elapsed > drainLen - DRAIN_OUT) a = (drainLen - elapsed) / DRAIN_OUT;
+      else a = 1;
+      return a * drainPeak;
+    }
+
     function tryMove(nx, ny) {
       const r = 0.18;
       if (!isWall(grid, nx + r, py) && !isWall(grid, nx - r, py)) px = nx;
@@ -249,61 +510,83 @@ const EscapeMode = (() => {
 
     function updateUncle(dt) {
       const dtS = dt / 1000;
+      if (uncleDead) return;
       const see = hasLOS(grid, uncle.x, uncle.y, px, py);
       if (see) { uncle.alert = 2.5; uncle.lastSeenX = px; uncle.lastSeenY = py; }
       else uncle.alert = Math.max(0, uncle.alert - dtS);
 
-      const tx = uncle.alert > 0 ? uncle.lastSeenX : uncle.lastSeenX + Math.sin(t / 900) * 2;
-      const ty = uncle.alert > 0 ? uncle.lastSeenY : uncle.lastSeenY + Math.cos(t / 900) * 2;
-      const dx = tx - uncle.x, dy = ty - uncle.y;
-      const d = Math.hypot(dx, dy);
-      const spd = (uncle.alert > 0 ? UNCLE_SPD * UNCLE_SPD_MULT : UNCLE_SPD * UNCLE_SPD_MULT * 0.45) * dtS;
-      if (d > 0.15) {
-        const stepx = dx / d * spd, stepy = dy / d * spd;
-        const r = 0.2;
-        let nx = uncle.x + stepx, ny = uncle.y + stepy;
-        if (!isWall(grid, nx + r, uncle.y) && !isWall(grid, nx - r, uncle.y)) uncle.x = nx;
-        if (!isWall(grid, uncle.x, ny + r) && !isWall(grid, uncle.x, ny - r)) uncle.y = ny;
-      }
+      /* He hunts on the same 4-way lattice as everything else, but unlike
+         the bunnies he keeps coming after you after losing sight — he
+         walks to the last cell he saw you in and mills around it. That's
+         what makes him a pursuer rather than a monster with an aggro
+         radius. */
+      const hunting = uncle.alert > 0;
+      const gx = hunting ? Math.floor(uncle.lastSeenX) : uncle.cx;
+      const gy = hunting ? Math.floor(uncle.lastSeenY) : uncle.cy;
+      uncle.pathT -= dt;
+      const spd = UNCLE_SPD * UNCLE_SPD_MULT * (hunting ? 1 : 0.4);
+      advanceMover(uncle, dtS, spd, (e) => {
+        if (hunting) {
+          if (e.pathT > 0) return;                 /* reuse the last route briefly */
+          const step = bfsFirstStep(grid, e.cx, e.cy, gx, gy);
+          e.pathT = 260;
+          if (step) { e.stepX = step.x; e.stepY = step.y; }
+        } else if (Math.random() < 0.55) {
+          const s = randomStepTarget(grid, e.cx, e.cy);   /* idle drift, not a patrol route */
+          if (s) { e.stepX = s.x; e.stepY = s.y; }
+        }
+      });
+      uncle.moved = false;
+
+      if (Math.hypot(uncle.x - px, uncle.y - py) < catchRadius) hurtPlayer(UNCLE_DMG);
     }
 
     function updateBunnies(dt) {
+      const dtS = dt / 1000;
+      const gx = Math.floor(px), gy = Math.floor(py);
       for (const b of bunnies) {
         if (b.dead) continue;
-        b.wobble += dt / 1000;
-        const wx = Math.sin(b.wobble * 0.7) * 0.01, wy = Math.cos(b.wobble * 0.5) * 0.01;
-        const r = 0.15;
-        const nx = b.x + wx, ny = b.y + wy;
-        if (!isWall(grid, nx + r, b.y) && !isWall(grid, nx - r, b.y)) b.x = nx;
-        if (!isWall(grid, b.x, ny + r) && !isWall(grid, b.x, ny - r)) b.y = ny;
+        b.wobble += dtS;
+        b.pathT -= dt;
+        /* Bunnies used to drift on a sine wave and mind their own business.
+           They hunt now, on the same cell-to-cell walk as everything else. */
+        advanceMover(b, dtS, 1.25, (e) => {
+          if (e.pathT > 0) return;
+          const step = bfsFirstStep(grid, e.cx, e.cy, gx, gy);
+          e.pathT = 320;
+          if (step) { e.stepX = step.x; e.stepY = step.y; }
+        });
+        b.moved = false;
+        if (Math.hypot(b.x - px, b.y - py) < catchRadius) hurtPlayer(BUNNY_DMG);
       }
     }
 
     function updateNightmares(dt) {
       const dtS = dt / 1000;
+      const gx = Math.floor(px), gy = Math.floor(py);
       for (const nm of nightmares) {
         if (nm.dead) continue;
         nm.wobble += dtS;
+        nm.pathT -= dt;
         const dist = Math.hypot(px - nm.x, py - nm.y);
         if (!nm.spotted && dist < DETECT_R && hasLOS(grid, nm.x, nm.y, px, py)) {
           nm.spotted = true;
           spotFlash = 1100;
           Assets.playSound('openFence', 0.4);
         }
-        if (nm.spotted) {
-          const dx = px - nm.x, dy = py - nm.y, d = Math.hypot(dx, dy) || 1;
-          const spd = NIGHTMARE_SPD * dtS;
-          const r = 0.18;
-          let nx = nm.x + dx / d * spd, ny = nm.y + dy / d * spd;
-          if (!isWall(grid, nx + r, nm.y) && !isWall(grid, nx - r, nm.y)) nm.x = nx;
-          if (!isWall(grid, nm.x, ny + r) && !isWall(grid, nm.x, ny - r)) nm.y = ny;
-        } else {
-          const wx = Math.sin(nm.wobble * 0.6) * 0.008, wy = Math.cos(nm.wobble * 0.4) * 0.008;
-          const r = 0.18;
-          const nx = nm.x + wx, ny = nm.y + wy;
-          if (!isWall(grid, nx + r, nm.y) && !isWall(grid, nx - r, nm.y)) nm.x = nx;
-          if (!isWall(grid, nm.x, ny + r) && !isWall(grid, nm.x, ny - r)) nm.y = ny;
-        }
+        advanceMover(nm, dtS, NIGHTMARE_SPD, (e) => {
+          if (nm.spotted) {
+            if (e.pathT > 0) return;
+            const step = bfsFirstStep(grid, e.cx, e.cy, gx, gy);
+            e.pathT = 260;
+            if (step) { e.stepX = step.x; e.stepY = step.y; }
+          } else if (Math.random() < 0.4) {
+            const s = randomStepTarget(grid, e.cx, e.cy);
+            if (s) { e.stepX = s.x; e.stepY = s.y; }
+          }
+        });
+        nm.moved = false;
+        if (Math.hypot(nm.x - px, nm.y - py) < catchRadius) hurtPlayer(NIGHTMARE_DMG);
       }
     }
 
@@ -348,6 +631,23 @@ const EscapeMode = (() => {
             }
           }
         }
+        /* Uncle takes a hit but doesn't die outright — he has a pool, and
+           shooting him is the win condition rather than a curiosity. */
+        if (!hitSomething && !uncleDead &&
+            Math.hypot(uncle.x - p.x, uncle.y - p.y) < PROJ_HIT_R) {
+          uncle.hp--;
+          uncleHurtFlash = 220;
+          Audio.SFX.hit();
+          hitSomething = true;
+          if (uncle.hp <= 0) {
+            uncleDead = true;
+            escapedT = 0;
+            tauntText = "he is just... standing there. he is not moving.";
+            tauntT = 6000;
+            Audio.stopMusic();
+            Audio.SFX.death();
+          }
+        }
         if (hitSomething) projectiles.splice(i, 1);
       }
     }
@@ -366,10 +666,23 @@ const EscapeMode = (() => {
         if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
         return;
       }
+      if (state === 'escaped') {
+        escapedT += dt;
+        if (escapedT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
+        return;
+      }
 
       if (stageBanner > 0) stageBanner = Math.max(0, stageBanner - dt);
       if (tauntT > 0) tauntT = Math.max(0, tauntT - dt);
       if (spotFlash > 0) spotFlash = Math.max(0, spotFlash - dt);
+      if (hurtFlash > 0) hurtFlash = Math.max(0, hurtFlash - dt);
+      if (hurtCooldown > 0) hurtCooldown = Math.max(0, hurtCooldown - dt);
+      if (uncleHurtFlash > 0) uncleHurtFlash = Math.max(0, uncleHurtFlash - dt);
+      updateColorDrain(dt);
+
+      /* music steps back while he's actively hunting — he should be the
+         loudest thing in the mix exactly when it matters */
+      Audio.duckMusic(uncle.alert > 0 ? 0.55 : 1);
 
       const dtS = Math.min(50, dt) / 1000;
       if (Input.down('left')) pa -= TURN_SPD * dtS;
@@ -390,15 +703,9 @@ const EscapeMode = (() => {
         nextTaunt = 7000 + Math.random() * 6000;
       }
 
-      if (Math.hypot(uncle.x - px, uncle.y - py) < catchRadius) {
-        state = 'caught'; caughtT = 0;
-        Assets.playSound('openFence', 0.5);
-      }
-      for (const nm of nightmares) {
-        if (!nm.dead && Math.hypot(nm.x - px, nm.y - py) < catchRadius) {
-          state = 'caught'; caughtT = 0;
-          Assets.playSound('openFence', 0.5);
-        }
+      if (uncleDead) {
+        state = 'escaped';
+        return;
       }
       if (bunnies.length && bunnies.every(b => b.dead)) {
         nextStage();
@@ -549,8 +856,8 @@ const EscapeMode = (() => {
 
       const lines = [
         'he listens from inside the walls',
-        'he cannot be stopped, only outrun',
-        'his bunnies CAN be dealt with',
+        'everything here wants you dead',
+        'he CAN be dealt with. bring bullets.',
       ];
       lines.forEach((line, i) => Font.drawCentered(g, line, SW / 2, 80 + i * 11, '#a898b8'));
 
@@ -566,7 +873,23 @@ const EscapeMode = (() => {
 
       if (state === 'menu') { drawMenu(g); return; }
 
+      const drain = colorDrainAmount();
+      if (drain > 1) g.filter = `grayscale(${drain.toFixed(0)}%)`;
       drawScene(g);
+
+      /* hurt vignette — a soft edge bloom, never a full-screen tint, so
+         taking a hit can't become a strobe under repeated contact */
+      if (hurtFlash > 0) {
+        const a = hurtFlash / 420;
+        g.save();
+        g.globalAlpha = a * 0.5;
+        const grd = g.createRadialGradient(SW / 2, SH / 2, SH * 0.25, SW / 2, SH / 2, SH * 0.85);
+        grd.addColorStop(0, 'rgba(140,0,10,0)');
+        grd.addColorStop(1, 'rgba(140,0,10,0.9)');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, SW, SH);
+        g.restore();
+      }
 
       /* HUD */
       g.fillStyle = 'rgba(10,8,16,0.55)';
@@ -574,6 +897,21 @@ const EscapeMode = (() => {
       Font.draw(g, 'BUNNIES: ' + bunniesSlain, 4, SH - 9, '#e8b0c8');
       Font.draw(g, 'STAGE ' + stage, SW / 2 - 18, SH - 9, '#8898c8');
       Font.draw(g, uncle.alert > 0 ? 'HE SEES YOU' : 'quiet...', SW - 90, SH - 9, uncle.alert > 0 ? '#f86060' : '#607080');
+
+      /* player health */
+      const hpW = 44, hpX = SW / 2 - hpW / 2, hpY = 4;
+      g.fillStyle = 'rgba(10,8,16,0.6)'; g.fillRect(hpX - 1, hpY - 1, hpW + 2, 5);
+      const hpFrac = Math.max(0, playerHP / PLAYER_MAX_HP);
+      g.fillStyle = hpFrac > 0.5 ? '#68c078' : hpFrac > 0.25 ? '#d8b040' : '#e05050';
+      g.fillRect(hpX, hpY, Math.round(hpW * hpFrac), 3);
+
+      /* Uncle's health, only once you've engaged him */
+      if (uncle.hp < UNCLE_MAX_HP || uncle.alert > 0) {
+        const uW = 60, uX = SW / 2 - uW / 2, uY = SH - 20;
+        g.fillStyle = 'rgba(10,8,16,0.6)'; g.fillRect(uX - 1, uY - 1, uW + 2, 4);
+        g.fillStyle = uncleDead ? '#404048' : '#c03848';
+        g.fillRect(uX, uY, Math.round(uW * Math.max(0, uncle.hp) / UNCLE_MAX_HP), 2);
+      }
 
       /* Uncle's taunts, subtitled like he's right behind you (he might be) */
       if (tauntT > 0 && tauntText) {
@@ -625,10 +963,45 @@ const EscapeMode = (() => {
         Font.drawCentered(g, 'reached stage ' + stage, SW / 2, SH / 2 + 40, '#c8b0b8');
         if (caughtT > 400) Font.drawCentered(g, 'Z / X TO RETURN TO TITLE', SW / 2, SH - 12, '#e8c850');
       }
+
+      if (state === 'escaped') {
+        g.fillStyle = 'rgba(4,6,10,0.72)'; g.fillRect(0, 0, SW, SH);
+        const img = Assets.getImage('scunterVictory') || Assets.getImage('scunterHurt');
+        if (img) {
+          const s = Math.min(SW / img.width, SH / img.height) * 1.3;
+          g.imageSmoothingEnabled = false;
+          g.globalAlpha = Math.min(1, escapedT / 900);
+          g.drawImage(img, (SW - img.width * s) / 2, (SH - img.height * s) / 2 - 6, img.width * s, img.height * s);
+          g.globalAlpha = 1;
+        }
+        Font.drawCentered(g, 'HE IS DOWN', SW / 2, 14, '#a8d8b0', 2);
+        Font.drawCentered(g, 'the gate is still shut', SW / 2, SH / 2 + 34, '#c8b0b8');
+        Font.drawCentered(g, 'bunnies slain: ' + bunniesSlain, SW / 2, SH / 2 + 46, '#8898a8');
+        if (escapedT > 400) Font.drawCentered(g, 'Z / X TO RETURN TO TITLE', SW / 2, SH - 12, '#e8c850');
+      }
+
+      g.filter = 'none';   /* don't leak the drain into the next frame */
     }
 
     let camPlaneX = 0, camPlaneY = 0;
-    return { name: 'escape', update, draw };
+    /* `_debug` is a read-only window onto the closure for the headless
+       harness in test/ — it is how the grid-lock and HP invariants get
+       asserted without a browser. Nothing in the game reads it. */
+    function debugState() {
+      return {
+        px, py, pa, state, stage, playerHP, uncleDead, escapedT,
+        uncle: {
+          x: uncle.x, y: uncle.y, cx: uncle.cx, cy: uncle.cy, hp: uncle.hp,
+          alert: uncle.alert, dead: uncleDead,
+          los: hasLOS(grid, uncle.x, uncle.y, px, py),
+          dist: Math.hypot(uncle.x - px, uncle.y - py),
+        },
+        bunnies: bunnies.map(b => ({ x: b.x, y: b.y, cx: b.cx, cy: b.cy, dead: b.dead })),
+        nightmares: nightmares.map(n => ({ x: n.x, y: n.y, cx: n.cx, cy: n.cy, spotted: n.spotted, dead: n.dead })),
+      };
+    }
+
+    return { name: 'escape', update, draw, _debug: debugState };
   }
 
   return { make };

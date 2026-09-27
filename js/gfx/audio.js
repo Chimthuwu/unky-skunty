@@ -28,6 +28,26 @@ const Audio = (() => {
   }
   function hz(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
 
+  /* ---- tempo drift: the pulse never settles ----
+     A track's written bpm is only the starting point. We hold a "current"
+     bpm that glides toward a randomly re-rolled target every few seconds,
+     so the groove keeps subtly stretching and collapsing. Both voices
+     read the same bpmNow, so lead+bass+bass ghost always stay in step. */
+  let bpmNow = 0, bpmTarget = 0, nextTempoRoll = 0;
+
+  function rollTempo(base) {
+    /* 0.62x - 1.17x of written tempo: slow enough to feel wrong rather
+       than like a different song */
+    bpmTarget = base * (0.62 + Math.random() * 0.55);
+    nextTempoRoll = ac.currentTime + 4 + Math.random() * 8;
+  }
+
+  function stepTempo() {
+    if (ac.currentTime >= nextTempoRoll) rollTempo(bpmNow);
+    bpmNow += (bpmTarget - bpmNow) * 0.02;   /* ~1s glide, avoids stepping */
+    return bpmNow;
+  }
+
   /* eerie detune: every so often the whole track sags down in pitch by a
      couple of semitones and creeps back, like the tape is warping. Purely
      a function of wall-clock audio time so lead+bass always sag together. */
@@ -144,11 +164,22 @@ const Audio = (() => {
     o.start(t); o.stop(t + dur + 0.02);
   }
 
+  /* ---- the ghost layer ----
+     The same lead phrase replayed a semitone up, in a sawtooth instead of
+     a square and a good deal quieter. One semitone is far enough apart to
+     beat and clang rather than sound like a harmony, which is the point:
+     it should read as the same tape playing against itself, not as a
+     second instrument. Scheduled at the root note's own start time rather
+     than run as a separate voice, so the two can never drift apart even
+     while the tempo is sliding. */
+  const GHOST_SEMITONES = 1;
+
   function scheduler() {
     if (!current) return;
     const tr = TRACKS[current];
     if (!tr) return;
-    const spb = 60 / tr.bpm;
+    if (!bpmNow) { bpmNow = tr.bpm; bpmTarget = tr.bpm; nextTempoRoll = ac.currentTime + 4; }
+    const spb = 60 / stepTempo();
     const ahead = ac.currentTime + 0.35;
     for (const v of ['lead', 'bass']) {
       const seq = tr[v];
@@ -158,8 +189,12 @@ const Audio = (() => {
         const dur = beats * spb;
         if (note > 0) {
           const detune = detuneSemitones(nextTime[v]);
-          if (v === 'lead') voice('square', note, nextTime[v], dur * 0.92, 0.10, musicGain, detune);
-          else voice('triangle', note, nextTime[v], dur * 0.95, 0.16, musicGain, detune);
+          if (v === 'lead') {
+            voice('square', note, nextTime[v], dur * 0.92, 0.10, musicGain, detune);
+            voice('sawtooth', note + GHOST_SEMITONES, nextTime[v], dur * 0.88, 0.045, musicGain, detune);
+          } else {
+            voice('triangle', note, nextTime[v], dur * 0.95, 0.16, musicGain, detune);
+          }
         }
         nextTime[v] += dur;
         trackPos[v]++;
@@ -177,8 +212,28 @@ const Audio = (() => {
     if (schedTimer) clearInterval(schedTimer);
     const tr = TRACKS[name];
     if (!tr) return;
+    bpmNow = tr.bpm; bpmTarget = tr.bpm;   /* reset drift on track change */
+    nextTempoRoll = ac.currentTime + 4;
+    lastDuck = null;
     schedTimer = setInterval(scheduler, 120);
     scheduler();
+  }
+
+  /* Pull the music down while Uncle is on you, so the thing actually
+     trying to catch you is the loudest thing in the mix. */
+  let lastDuck = null;
+  function duckMusic(amount) {
+    if (!musicGain) return;
+    const v = 0.8 * amount;
+    /* compare against what we last asked for rather than reading
+       gain.value: the param's .value doesn't reliably reflect in-flight
+       automation, and duckMusic runs every frame */
+    if (lastDuck !== null && Math.abs(lastDuck - v) < 0.005) return;
+    lastDuck = v;
+    try {
+      musicGain.gain.cancelScheduledValues(ac.currentTime);
+      musicGain.gain.setTargetAtTime(v, ac.currentTime, 0.15);
+    } catch (e) { /* ignore */ }
   }
 
   function stopMusic() {
@@ -248,5 +303,5 @@ const Audio = (() => {
     select:   () => blip(740, 0.06, 'square', 0.14),
   };
 
-  return { startMusic, stopMusic, SFX, toggleMute, init, resume, TRACKS, get muted() { return muted; } };
+  return { startMusic, stopMusic, SFX, toggleMute, init, resume, duckMusic, TRACKS, get muted() { return muted; } };
 })();
