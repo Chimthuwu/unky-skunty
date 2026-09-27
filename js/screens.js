@@ -34,10 +34,15 @@ const Screens = {
       },
       draw(g) {
         const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-        /* night sky */
-        g.fillStyle = '#0c1228'; g.fillRect(0, 0, SW, SH);
+        /* night sky gradient */
+        const sky = g.createLinearGradient(0, 0, 0, SH);
+        sky.addColorStop(0, '#0a1030');
+        sky.addColorStop(0.6, '#101a40');
+        sky.addColorStop(1, '#1a2448');
+        g.fillStyle = sky;
+        g.fillRect(0, 0, SW, SH);
         /* stars */
-        for (let i = 0; i < 40; i++) {
+        for (let i = 0; i < 44; i++) {
           const x = (i * 97) % SW, y = (i * 53) % 90;
           g.fillStyle = (Math.floor(t / 500 + i) % 4 === 0) ? '#f8f8d0' : '#5868a0';
           g.fillRect(x, y, 1, 1);
@@ -57,26 +62,23 @@ const Screens = {
         g.fillStyle = '#e8c850';
         g.fillRect(SW - 58, SH - 66, 4, 4); /* lit window */
 
-        /* logo */
-        const title = 'EMBERWRATH';
-        const sub = 'CHRONICLE';
+        /* logo plate */
+        UI.frame(g, 24, 14, SW - 48, 60);
+        const title = 'PSYDECHAT';
+        const sub = 'EMBLEM';
         const bob = Math.sin(t / 600) * 1.5;
-        UI.frame(g, 30, 18, SW - 60, 52);
-        Font.drawCentered(g, title, SW / 2, 26 + bob, '#f8d050', 2);
-        Font.drawCentered(g, sub, SW / 2, 44 + bob, '#a8c8f0', 2);
-        Font.drawCentered(g, 'A TACTICAL SAGA', SW / 2, 60, '#6878a8');
+        /* beveled gold title: light pass above, gold main */
+        Font.drawCentered(g, title, SW / 2, 21 + bob, '#fff4b0', 2);
+        Font.drawCentered(g, title, SW / 2, 22 + bob, '#f8d050', 2);
+        Font.drawCentered(g, sub, SW / 2, 42 + bob, '#e8e8d0', 2);
+        Font.drawCentered(g, 'A TACTICAL SAGA', SW / 2, 60, '#8898c8');
+        /* emblem diamond accents */
+        g.fillStyle = '#e8c850';
+        g.fillRect(32, 40, 3, 3); g.fillRect(SW - 35, 40, 3, 3);
 
         /* menu */
         const list = opts();
-        UI.window(g, SW / 2 - 52, SH - 52, 104, list.length * 14 + 10);
-        list.forEach((o, i) => {
-          const yy = SH - 52 + 6 + i * 14;
-          if (i === sel) {
-            g.fillStyle = '#384878'; g.fillRect(SW / 2 - 49, yy - 2, 98, 13);
-            Font.draw(g, '→', SW / 2 - 44, yy, '#f8f850');
-          }
-          Font.draw(g, o.label, SW / 2 - 34, yy, i === sel ? '#f8f850' : '#e8e8d0');
-        });
+        UI.menu(g, SW / 2 - 52, SH - 54, 104, list.map(o => ({ label: o.label })), sel);
         Font.drawCentered(g, 'Z/ENTER CONFIRM   X CANCEL   C MENU', SW / 2, SH - 8, '#485878');
       },
     };
@@ -110,14 +112,22 @@ const Screens = {
       },
       draw(g) {
         const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-        g.fillStyle = '#0a0e20'; g.fillRect(0, 0, SW, SH);
-        /* slow ember particles */
-        for (let i = 0; i < 14; i++) {
+        /* dusk gradient + embers */
+        const sky = g.createLinearGradient(0, 0, 0, SH);
+        sky.addColorStop(0, '#160c22');
+        sky.addColorStop(0.55, '#241224');
+        sky.addColorStop(1, '#3a1c14');
+        g.fillStyle = sky;
+        g.fillRect(0, 0, SW, SH);
+        for (let i = 0; i < 16; i++) {
           const x = (i * 61 + Math.sin(t / 900 + i) * 20 + t / 40) % SW;
           const y = SH - ((t / 18 + i * 37) % (SH + 20));
           g.fillStyle = i % 2 ? '#c86030' : '#e8a040';
           g.fillRect(Math.round(x), Math.round(y), 1, 1);
         }
+        /* chapter ribbon */
+        const rtxt = 'THE ASHENREACH';
+        UI.phaseBanner(g, rtxt, '#e8a050', 12, 100, 44);
         UI.window(g, 14, SH - 78, SW - 28, 56);
         /* wrap current page */
         const words = pages[page].slice(0, chars).split(' ');
@@ -128,9 +138,9 @@ const Screens = {
           if (Font.width(test) > SW - 48) { lines.push(line); line = w; } else line = test;
         }
         if (line) lines.push(line);
-        lines.forEach((l, i) => Font.draw(g, l, 22, SH - 70 + i * 10, '#e8e8d0'));
+        lines.forEach((l, i) => Font.draw(g, l, 22, SH - 70 + i * 10, '#f0ead8'));
         if (Math.floor(t / 350) % 2 === 0) Font.draw(g, '→', SW - 30, SH - 32, '#f8f850');
-        Font.drawCentered(g, 'X TO SKIP', SW / 2, 8, '#40507a');
+        Font.drawCentered(g, 'X TO SKIP', SW / 2, 8, '#68708c');
       },
     };
   },
@@ -164,26 +174,36 @@ const Screens = {
       },
       draw(g) {
         const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-        g.fillStyle = '#101828'; g.fillRect(0, 0, SW, SH);
-        Font.drawCentered(g, 'CHAPTER 1', SW / 2, 8, '#f8d050');
-        Font.drawCentered(g, 'THE ASHENREACH GATE', SW / 2, 20, '#e8e8d0');
-        Font.drawCentered(g, 'DEPLOY YOUR FORCES', SW / 2, 34, '#7888b8');
+        const bg = g.createLinearGradient(0, 0, 0, SH);
+        bg.addColorStop(0, '#141c38');
+        bg.addColorStop(1, '#1a2448');
+        g.fillStyle = bg;
+        g.fillRect(0, 0, SW, SH);
+        /* header banner */
+        UI.phaseBanner(g, 'DEPLOY YOUR FORCES', '#f8d050', 12, 100, 20);
+        Font.drawCentered(g, 'CHAPTER 1 — THE ASHENREACH GATE', SW / 2, 38, '#e8e8d0');
         UI.frame(g, 24, 44, SW - 48, SH - 62);
         roster.forEach((c, i) => {
           const y = 52 + i * 13;
           const on = deployed[i];
-          if (i === sel) { g.fillStyle = '#384878'; g.fillRect(28, y - 2, SW - 56, 12); }
-          Font.draw(g, on ? '·' : ' ', 30, y, on ? '#70f070' : '#586078');
-          Font.draw(g, c.name, 40, y, on ? '#e8e8d0' : '#586078');
-          Font.draw(g, ClassDB[c.classId].name.slice(0, 14), 90, y, '#a8b8d8');
-          Font.draw(g, 'LV' + c.level, 168, y, '#c8d8f8');
-          /* portrait */
+          if (i === sel) {
+            g.fillStyle = '#2c4a8c';
+            g.fillRect(28, y - 2, SW - 56, 12);
+            g.fillStyle = 'rgba(200,168,72,0.30)';
+            g.fillRect(28, y - 2, SW - 56, 1);
+            g.fillRect(28, y + 9, SW - 56, 1);
+          }
+          /* deploy check mark */
+          Font.draw(g, on ? '√' : ' ', 30, y, on ? '#70f070' : '#586078');
+          Font.draw(g, c.name, 40, y, on ? (i === sel ? '#fff8c0' : '#e8e8d0') : '#586078');
+          Font.draw(g, ClassDB[c.classId].name.slice(0, 14), 90, y, on ? '#a8b8d8' : '#485068');
+          Font.draw(g, 'LV' + c.level, 168, y, on ? '#c8d8f8' : '#485068');
+          /* portrait + bio for the highlighted unit */
           if (i === sel) {
             const art = CharArt.portrait(c.portrait);
             g.imageSmoothingEnabled = false;
             UI.frame(g, SW - 74, 46, 56, 56);
             g.drawImage(art, 0, 0, 32, 32, SW - 70, 50, 48, 48);
-            /* bio */
             UI.window(g, 30, SH - 34, SW - 60, 26);
             const words = (c.bio || '').split(' ');
             let line = '', lines = [];
@@ -217,22 +237,36 @@ const Screens = {
       },
       draw(g) {
         const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-        g.fillStyle = '#0c1428'; g.fillRect(0, 0, SW, SH);
-        for (let i = 0; i < 30; i++) {
+        /* dawn gradient + drifting sparks */
+        const sky = g.createLinearGradient(0, 0, 0, SH);
+        sky.addColorStop(0, '#1a1430');
+        sky.addColorStop(0.6, '#2a2040');
+        sky.addColorStop(1, '#3a3020');
+        g.fillStyle = sky;
+        g.fillRect(0, 0, SW, SH);
+        for (let i = 0; i < 34; i++) {
           const x = (i * 83) % SW, y = (i * 41) % SH;
           g.fillStyle = (Math.floor(t / 400 + i) % 5) ? '#5868a0' : '#f8f8d0';
           g.fillRect(x, y, 1, 1);
         }
-        Font.drawCentered(g, 'CHAPTER CLEAR!', SW / 2, 14, '#f8d050', 2);
-        Font.drawCentered(g, 'THE ASHENREACH GATE IS RETAKEN', SW / 2, 34, '#a8c8f0');
+        /* rising ember motes (victory fires) */
+        for (let i = 0; i < 10; i++) {
+          const x = (i * 67 + Math.sin(t / 800 + i) * 14 + t / 30) % SW;
+          const y = SH - ((t / 22 + i * 53) % (SH + 16));
+          g.fillStyle = i % 2 ? '#e8a040' : '#f8d050';
+          g.fillRect(Math.round(x), Math.round(y), 1, 1);
+        }
+        UI.phaseBanner(g, 'CHAPTER CLEAR!', '#f8d050', 12, 100, 18);
+        Font.drawCentered(g, 'THE ASHENREACH GATE IS RETAKEN', SW / 2, 38, '#a8c8f0');
         UI.frame(g, 40, 46, SW - 80, 66);
-        Font.draw(g, 'TURN', 52, 54, '#a8b8d8');
-        Font.draw(g, String(Game.turn), 120, 54, '#f8f8d0');
-        Font.draw(g, 'FALLEN', 52, 66, '#a8b8d8');
-        Font.draw(g, String(Game.deaths), 120, 66, Game.deaths ? '#f07070' : '#f8f8d0');
-        Font.draw(g, 'GOLD', 52, 78, '#a8b8d8');
-        Font.draw(g, String(Game.gold), 120, 78, '#f8d850');
-        Font.draw(g, 'SURVIVORS', 52, 92, '#a8b8d8');
+        const row = (label, val, yy, col) => {
+          Font.draw(g, label, 52, yy, '#8898b8');
+          Font.draw(g, val, 120, yy, col);
+        };
+        row('TURN', String(Game.turn), 54, '#f0f0d8');
+        row('FALLEN', String(Game.deaths), 66, Game.deaths ? '#f07070' : '#f0f0d8');
+        row('GOLD', String(Game.gold), 78, '#f8d850');
+        row('SURVIVORS', '', 92, '#f0f0d8');
         survivors.forEach((u, i) => Font.draw(g, u.name.slice(0, 7), 118 + i * 22, 92, '#90f090'));
         if (t > 800 && Math.floor(t / 350) % 2 === 0) {
           Font.drawCentered(g, 'PRESS Z', SW / 2, SH - 14, '#f8f850');
@@ -256,10 +290,24 @@ const Screens = {
       },
       draw(g) {
         const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-        g.fillStyle = '#180808'; g.fillRect(0, 0, SW, SH);
+        /* dark vignette gradient */
+        const bg = g.createLinearGradient(0, 0, 0, SH);
+        bg.addColorStop(0, '#1c0808');
+        bg.addColorStop(0.5, '#2a0e0c');
+        bg.addColorStop(1, '#120404');
+        g.fillStyle = bg;
+        g.fillRect(0, 0, SW, SH);
+        /* falling ash */
+        for (let i = 0; i < 18; i++) {
+          const x = (i * 71 + Math.sin(t / 700 + i) * 12) % SW;
+          const y = (t / 26 + i * 47) % (SH + 12);
+          g.fillStyle = i % 3 ? '#584040' : '#7a5a50';
+          g.fillRect(Math.round(x), Math.round(y), 1, 1);
+        }
         const a = Math.min(1, t / 1500);
         g.globalAlpha = a;
-        Font.drawCentered(g, 'GAME OVER', SW / 2, SH / 2 - 16, '#f05050', 3);
+        /* gold-ribbon banner, drained to red */
+        UI.phaseBanner(g, 'GAME OVER', '#f05050', 12, 100, 58);
         Font.drawCentered(g, 'THE EMBERWATCH HAS FALLEN...', SW / 2, SH / 2 + 12, '#a87878');
         g.globalAlpha = 1;
         if (t > 1200 && Math.floor(t / 350) % 2 === 0) {

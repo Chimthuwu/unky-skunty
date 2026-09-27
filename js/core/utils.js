@@ -1,5 +1,5 @@
 /* =============================================================
-   EMBERWRATH CHRONICLE — core utilities
+   PSYDECHAT EMBLEM — core utilities
    ============================================================= */
 'use strict';
 

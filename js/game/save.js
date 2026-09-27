@@ -4,10 +4,16 @@
 'use strict';
 
 const SaveLoad = {
-  KEY: 'emberwrath_save_v1',
+  KEY: 'psydechat_save_v1',
+  OLD_KEY: 'emberwrath_save_v1',   /* pre-rename saves migrate transparently */
 
   has() {
-    try { return !!localStorage.getItem(this.KEY); } catch (e) { return false; }
+    try {
+      if (localStorage.getItem(this.KEY)) return true;
+      const old = localStorage.getItem(this.OLD_KEY);
+      if (old) { localStorage.setItem(this.KEY, old); return true; }
+      return false;
+    } catch (e) { return false; }
   },
 
   save(meta) {

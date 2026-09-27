@@ -1,4 +1,4 @@
-# EMBERWRATH CHRONICLE — Version 0.1
+# PSYDECHAT EMBLEM — Version 0.1
 
 An original turn-based tactical RPG prototype in the spirit of early-2000s
 handheld tactical RPGs. Zero dependencies, zero build step, zero external

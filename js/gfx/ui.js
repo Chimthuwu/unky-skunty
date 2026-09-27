@@ -293,14 +293,15 @@ const UI = {
     g.globalAlpha = 1;
   },
 
-  /* GBA phase banner: widening gold ribbon with gradient core. */
-  phaseBanner(g, text, col, t, dur) {
+  /* GBA phase banner: widening gold ribbon with gradient core.
+     yC optionally pins the ribbon's vertical center (default: screen middle). */
+  phaseBanner(g, text, col, t, dur, yC) {
     const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
     const p = Utils.clamp(t / 12, 0, 1);           /* slide-in progress */
     const fade = Utils.clamp((dur - t) / 12, 0, 1); /* fade-out */
     const wBand = Math.round(SW * (0.6 + 0.4 * p));
     const bh = 26;
-    const y = Math.round(SH / 2 - bh / 2);
+    const y = Math.round((yC === undefined ? SH / 2 : yC) - bh / 2);
     g.globalAlpha = 0.75 * Math.min(p, fade);
     g.fillStyle = 'rgba(8,10,24,0.8)';
     g.fillRect(0, y, SW, bh);

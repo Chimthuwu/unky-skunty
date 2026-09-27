@@ -189,13 +189,42 @@ try {
   const d = E.Game.units.find(x => x.team === 'enemy');
   if (a && d) {
     E.Game.mode = 'idle';
+    /* full event stream: exercise swing/hit/crit/miss/heal/death FX */
     E.PlayBattle.play(a, d, [
       { type: 'swing', atk: a },
       { type: 'hit', atk: a, def: d, dmg: 5, crit: false },
+      { type: 'crit', atk: a, def: d, dmg: 9 },
+      { type: 'miss', atk: d },
+      { type: 'heal', caster: d, amount: 7 },
+      { type: 'death', side: 'd' },
       { type: 'end' },
     ], false, null);
-    for (let i = 0; i < 8; i++) { E.PlayBattle.update(16); E.PlayBattle.draw(ctx); }
+    for (let i = 0; i < 40; i++) { E.PlayBattle.update(16); E.PlayBattle.draw(ctx); }
+    /* intro slide + VS flash frames */
+    E.PlayBattle.play(a, d, [{ type: 'end' }], false, null);
+    E.PlayBattle.timer = 250;
+    E.PlayBattle.draw(ctx);
     E.PlayBattle.active = false;
+    /* fx layers directly */
+    E.PlayBattle.bursts.push({ x: 76, y: 96, t: 5, crit: true });
+    E.PlayBattle.dmgPopups.push({ v: 7, side: 'd', t: 10, crit: false });
+    E.PlayBattle.trails.push({ side: 'a', t: 3 });
+    E.PlayBattle.drawBg(ctx, E.Config.SCREEN_W, E.Config.SCREEN_H);
+    E.PlayBattle.drawBurst(ctx);
+    E.PlayBattle.drawDmgPopups(ctx);
+    E.PlayBattle.drawTrail(ctx, 'a', E.Config.SCREEN_H - 44);
+    /* death fall render path */
+    E.PlayBattle.deathSide = 'd'; E.PlayBattle.deathFall = 0.5;
+    E.PlayBattle.draw(ctx);
+    E.PlayBattle.deathSide = null; E.PlayBattle.deathFall = 0;
+    /* every terrain background renders */
+    for (const tid of Object.keys(E.PlayBattle.BG_DECO)) {
+      E.PlayBattle.bg = tid;
+      E.PlayBattle.drawBg(ctx, E.Config.SCREEN_W, E.Config.SCREEN_H);
+    }
+    E.PlayBattle.bg = 'notATile';
+    E.PlayBattle.drawBg(ctx, E.Config.SCREEN_W, E.Config.SCREEN_H);
+    E.PlayBattle.bg = 'plain';
   }
   const lu = E.Game.units.find(x => x.team === 'player');
   lu.exp = 60;

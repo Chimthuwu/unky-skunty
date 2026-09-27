@@ -956,17 +956,19 @@ const Game = {
       }
     }
 
-    /* range overlays */
+    /* range overlays — soft pulse so edges read as "alive" */
+    const pulse = 0.30 + 0.10 * Math.sin(performance.now() / 240);
     if (this.moveTiles.length) {
       for (const t of this.moveTiles) {
-        g.fillStyle = 'rgba(80,140,248,0.4)';
+        g.fillStyle = 'rgba(80,140,248,' + pulse.toFixed(3) + ')';
         g.fillRect(ox + t.x * T, oy + t.y * T, T, T);
       }
     }
     if (this.atkTiles && this.atkTiles.size) {
+      const aPulse = 0.26 + 0.10 * Math.sin(performance.now() / 240);
       for (const key of this.atkTiles) {
         const tx = key % GameMap.w, ty = (key / GameMap.w) | 0;
-        g.fillStyle = 'rgba(240,80,80,0.35)';
+        g.fillStyle = 'rgba(240,80,80,' + aPulse.toFixed(3) + ')';
         g.fillRect(ox + tx * T, oy + ty * T, T, T);
       }
     }
@@ -989,6 +991,12 @@ const Game = {
       const kind = u.sprite || 'npc';
       const frame = (Math.floor(performance.now() / 400) % 2);
       g.drawImage(CharArt.unit(kind, frame, false), px, py);
+      /* team pip: blue player / red enemy / green NPC, top-left */
+      const pip = u.team === 'player' ? '#4c78e8' : (u.team === 'enemy' ? '#d84040' : '#4ca85c');
+      g.fillStyle = '#0a0f22';
+      g.fillRect(px + 1, py + 1, 4, 4);
+      g.fillStyle = pip;
+      g.fillRect(px + 2, py + 2, 2, 2);
       if (u.acted) {
         g.fillStyle = 'rgba(40,40,60,0.55)';
         g.fillRect(px, py, T, T);
