@@ -18,6 +18,8 @@ const Assets = (() => {
     scunterGbGlitch: 'js/assets/img/scunter_gb_glitch.png',
     scunterMapIdle: 'js/assets/img/scunter_map_idle.png',
     scunterMapWalk: 'js/assets/img/scunter_map_walk.png',
+    scunterMapRun: 'js/assets/img/scunter_map_run.png',
+    scunterAttack: 'js/assets/img/scunter_attack_front.png',
     scunterHurt: 'js/assets/img/scunter_hurt_front.png',
     scunterVictory: 'js/assets/img/scunter_victory_front.png',
     wallTexture: 'js/assets/img/wall_texture.png',

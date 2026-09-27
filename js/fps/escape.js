@@ -4,8 +4,9 @@
    are being hunted through Uncle Scunter's compound. He cannot be
    hurt — only avoided, or lost by breaking line of sight. His
    bunnies patrol the halls and CAN be shot.
-   Self-contained: only touches Config/Font/UI/Input/Audio/Assets.
-   Never touches the tactics engine.
+   Also haunted by the old (deleted) tactics game: its enemy/hero unit
+   sprites live on in CharArt, melted and given glowing red eyes, as
+   roaming "nightmare" enemies that hunt you once they spot you.
    ============================================================= */
 'use strict';
 
@@ -86,6 +87,53 @@ const EscapeMode = (() => {
     return c;
   }
 
+  /* ---------------- twisted nightmare sprites ----------------
+     Takes an old tactics-game unit sprite (CharArt.unit) and melts it:
+     row-by-row horizontal warp + wobble-stretch, out-of-proportion limbs,
+     and forced glowing red eyes. Cached per (kind,frame) since it's a
+     pixel-by-pixel redraw. */
+  const NIGHTMARE_KINDS = ['ebrigand', 'earcher', 'earmor', 'eshaman', 'lord', 'arch', 'brute', 'mage', 'cleric', 'cav'];
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const twistCache = new Map();
+  function twistedSprite(kind, frame) {
+    const key = kind + '|' + frame;
+    if (twistCache.has(key)) return twistCache.get(key);
+    const src = CharArt.unit(kind, frame, false);
+    const seed = key.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const rand = mulberry32(seed);
+    const OW = 26, OH = 30;
+    const c = document.createElement('canvas');
+    c.width = OW; c.height = OH;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    for (let y = 0; y < 16; y++) {
+      const destY = Math.floor(y * (OH / 16) + Math.sin(y * 1.4 + seed) * 1.8);
+      const xShift = Math.sin(y * 0.8 + seed * 2.1) * (3 + rand() * 3);
+      const rowScale = 1 + Math.sin(y * 0.6 + seed) * 0.5 + (y > 10 ? rand() * 0.6 : 0); /* legs go extra wrong */
+      g.save();
+      g.translate(OW / 2 + xShift, destY);
+      g.scale(rowScale, 1.4);
+      g.drawImage(src, 0, y, 16, 1, -8, 0, 16, 2);
+      g.restore();
+    }
+    /* glowing red eyes, forced on regardless of source art */
+    g.fillStyle = '#ff2030';
+    g.fillRect(OW / 2 - 5, 6, 2, 2);
+    g.fillRect(OW / 2 + 3, 6, 2, 2);
+    g.fillStyle = 'rgba(255,20,40,0.5)';
+    g.fillRect(OW / 2 - 6, 5, 4, 4);
+    g.fillRect(OW / 2 + 2, 5, 4, 4);
+    twistCache.set(key, c);
+    return c;
+  }
+
   const TAUNTS = [
     "Wot im talking about ye is England for the English innit.",
     "I have an air rifle for when this country goes to shit!",
@@ -125,21 +173,39 @@ const EscapeMode = (() => {
       return picked.map(c => ({ x: c.x, y: c.y, dead: false, wobble: Math.random() * 10 }));
     }
 
+    let nightmares;
+    const NIGHTMARE_SPD = 1.5, DETECT_R = 5.5;
+    function spawnNightmares(count) {
+      const pool = floorCells.filter(c => Math.hypot(c.x - px, c.y - py) > 4);
+      const picked = [];
+      for (let i = 0; i < count && pool.length; i++) {
+        const idx = (Math.random() * pool.length) | 0;
+        picked.push(pool.splice(idx, 1)[0]);
+      }
+      return picked.map(c => ({
+        x: c.x, y: c.y, dead: false, spotted: false, wobble: Math.random() * 10,
+        kind: NIGHTMARE_KINDS[(Math.random() * NIGHTMARE_KINDS.length) | 0],
+      }));
+    }
+
     function resetRun() {
       px = 2.5; py = 2.5; pa = 0.4;
       stage = 1;
       uncle = { x: 12.5, y: 8.5, alert: 0, lastSeenX: 12.5, lastSeenY: 8.5 };
       bunnies = spawnBunnies(5 + stage);
+      nightmares = spawnNightmares(2);
       bunniesSlain = 0;
       shotFlash = 0;
       projectiles = [];
       stageBanner = 1400;
       nextTaunt = 4000 + Math.random() * 3000;
+      spotFlash = 0;
     }
 
     function nextStage() {
       stage++;
       bunnies = spawnBunnies(Math.min(14, 5 + stage));
+      nightmares.push(...spawnNightmares(Math.min(6, 1 + Math.floor(stage / 2))));
       stageBanner = 1400;
       UNCLE_SPD_MULT = 1 + (stage - 1) * 0.08;
     }
@@ -154,6 +220,7 @@ const EscapeMode = (() => {
     let nextTaunt = 5000;
     let tauntText = '', tauntT = 0;
     let UNCLE_SPD_MULT = 1;
+    let spotFlash = 0;
     resetRun();
 
     /* fixed-looking but slightly-off ear positions poking in from the
@@ -212,6 +279,34 @@ const EscapeMode = (() => {
       }
     }
 
+    function updateNightmares(dt) {
+      const dtS = dt / 1000;
+      for (const nm of nightmares) {
+        if (nm.dead) continue;
+        nm.wobble += dtS;
+        const dist = Math.hypot(px - nm.x, py - nm.y);
+        if (!nm.spotted && dist < DETECT_R && hasLOS(grid, nm.x, nm.y, px, py)) {
+          nm.spotted = true;
+          spotFlash = 1100;
+          Assets.playSound('openFence', 0.4);
+        }
+        if (nm.spotted) {
+          const dx = px - nm.x, dy = py - nm.y, d = Math.hypot(dx, dy) || 1;
+          const spd = NIGHTMARE_SPD * dtS;
+          const r = 0.18;
+          let nx = nm.x + dx / d * spd, ny = nm.y + dy / d * spd;
+          if (!isWall(grid, nx + r, nm.y) && !isWall(grid, nx - r, nm.y)) nm.x = nx;
+          if (!isWall(grid, nm.x, ny + r) && !isWall(grid, nm.x, ny - r)) nm.y = ny;
+        } else {
+          const wx = Math.sin(nm.wobble * 0.6) * 0.008, wy = Math.cos(nm.wobble * 0.4) * 0.008;
+          const r = 0.18;
+          const nx = nm.x + wx, ny = nm.y + wy;
+          if (!isWall(grid, nx + r, nm.y) && !isWall(grid, nx - r, nm.y)) nm.x = nx;
+          if (!isWall(grid, nm.x, ny + r) && !isWall(grid, nm.x, ny - r)) nm.y = ny;
+        }
+      }
+    }
+
     const PROJ_SPD = 9, PROJ_LIFE = 900, PROJ_HIT_R = 0.32;
 
     function shoot() {
@@ -232,15 +327,28 @@ const EscapeMode = (() => {
         const nx = p.x + p.dx * PROJ_SPD * dtS, ny = p.y + p.dy * PROJ_SPD * dtS;
         if (p.life <= 0 || isWall(grid, nx, ny)) { projectiles.splice(i, 1); continue; }
         p.x = nx; p.y = ny;
+        let hitSomething = false;
         for (const b of bunnies) {
           if (b.dead) continue;
           if (Math.hypot(b.x - p.x, b.y - p.y) < PROJ_HIT_R) {
             b.dead = true; bunniesSlain++;
             Assets.playSound('doorOpen', 0.3);
-            projectiles.splice(i, 1);
+            hitSomething = true;
             break;
           }
         }
+        if (!hitSomething) {
+          for (const nm of nightmares) {
+            if (nm.dead) continue;
+            if (Math.hypot(nm.x - p.x, nm.y - p.y) < PROJ_HIT_R) {
+              nm.dead = true;
+              Assets.playSound('doorOpen', 0.3);
+              hitSomething = true;
+              break;
+            }
+          }
+        }
+        if (hitSomething) projectiles.splice(i, 1);
       }
     }
 
@@ -261,6 +369,7 @@ const EscapeMode = (() => {
 
       if (stageBanner > 0) stageBanner = Math.max(0, stageBanner - dt);
       if (tauntT > 0) tauntT = Math.max(0, tauntT - dt);
+      if (spotFlash > 0) spotFlash = Math.max(0, spotFlash - dt);
 
       const dtS = Math.min(50, dt) / 1000;
       if (Input.down('left')) pa -= TURN_SPD * dtS;
@@ -271,6 +380,7 @@ const EscapeMode = (() => {
 
       updateUncle(dt);
       updateBunnies(dt);
+      updateNightmares(dt);
       updateProjectiles(dt);
 
       nextTaunt -= dt;
@@ -283,6 +393,12 @@ const EscapeMode = (() => {
       if (Math.hypot(uncle.x - px, uncle.y - py) < catchRadius) {
         state = 'caught'; caughtT = 0;
         Assets.playSound('openFence', 0.5);
+      }
+      for (const nm of nightmares) {
+        if (!nm.dead && Math.hypot(nm.x - px, nm.y - py) < catchRadius) {
+          state = 'caught'; caughtT = 0;
+          Assets.playSound('openFence', 0.5);
+        }
       }
       if (bunnies.length && bunnies.every(b => b.dead)) {
         nextStage();
@@ -332,9 +448,16 @@ const EscapeMode = (() => {
       /* ---- billboard sprites (bunnies + Uncle), painter's algorithm ---- */
       const sprites = [];
       for (const b of bunnies) if (!b.dead) sprites.push({ x: b.x, y: b.y, img: bunnySprite(), scale: 0.8 });
-      const uImg = (Math.floor(t / 300) % 2 === 0) ? Assets.getImage('scunterMapIdle') : Assets.getImage('scunterMapWalk');
+      const uImg = uncle.alert > 0
+        ? ((Math.floor(t / 150) % 2 === 0) ? Assets.getImage('scunterMapRun') : Assets.getImage('scunterMapWalk'))
+        : ((Math.floor(t / 400) % 2 === 0) ? Assets.getImage('scunterMapIdle') : Assets.getImage('scunterMapWalk'));
       sprites.push({ x: uncle.x, y: uncle.y, img: uImg, scale: 1.35, uncle: true });
       for (const p of projectiles) sprites.push({ x: p.x, y: p.y, img: bulletSprite(), scale: 0.16, glow: true });
+      for (const nm of nightmares) {
+        if (nm.dead) continue;
+        const frame = Math.floor(nm.wobble * 2) % 2;
+        sprites.push({ x: nm.x, y: nm.y, img: twistedSprite(nm.kind, frame), scale: 1.1 });
+      }
       sprites.sort((a, b2) => Math.hypot(b2.x - px, b2.y - py) - Math.hypot(a.x - px, a.y - py));
 
       for (const s of sprites) {
@@ -463,9 +586,21 @@ const EscapeMode = (() => {
         g.restore();
       }
 
+      /* jumpscare: a nightmare just spotted you — corrupted text burst */
+      if (spotFlash > 0) {
+        const a = Math.min(1, spotFlash / 250);
+        g.save();
+        g.globalAlpha = a;
+        if (Math.random() < 0.6) { g.fillStyle = 'rgba(255,0,20,0.18)'; g.fillRect(0, 0, SW, SH); }
+        const jx = Math.random() * 6 - 3, jy = Math.random() * 6 - 3;
+        Font.drawCentered(g, 'fire embl3333333//}', SW / 2 + jx, SH / 2 - 6 + jy, '#ff2040', 2);
+        Font.drawCentered(g, 'fire embl3333333//}', SW / 2 - jx, SH / 2 - 6 - jy, '#40ffe0', 2);
+        g.restore();
+      }
+
       if (state === 'caught') {
         g.fillStyle = 'rgba(30,0,4,0.55)'; g.fillRect(0, 0, SW, SH);
-        const img = Assets.getImage('scunterGbGlitch');
+        const img = Assets.getImage('scunterAttack') || Assets.getImage('scunterGbGlitch');
         if (img) {
           const s = Math.min(SW / img.width, SH / img.height) * 1.6;
           g.imageSmoothingEnabled = false;
