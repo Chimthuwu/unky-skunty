@@ -1220,7 +1220,10 @@ const EscapeMode = (() => {
         }
         Font.drawCentered(g, 'HE GOT YOU', SW / 2, 12, '#f86060', 2);
         Font.drawCentered(g, 'reached stage ' + stage, SW / 2, SH / 2 + 40, '#c8b0b8');
-        if (caughtT > 400) Font.drawCentered(g, 'Z / X TO RETURN TO TITLE', SW / 2, SH - 12, '#e8c850');
+        /* no prompt here — there is no key that takes you back to the
+           title any more. The card just sits until the screen comes
+           apart under it, and a "Z / X TO RETURN TO TITLE" line here
+           would be promising a door that isn't there. */
       }
 
       if (state === 'escaped') {
