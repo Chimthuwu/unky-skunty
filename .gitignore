@@ -16,3 +16,9 @@ Thumbs.db
 # --- node (tests only; game has no deps) ---
 node_modules/
 npm-debug.log*
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example

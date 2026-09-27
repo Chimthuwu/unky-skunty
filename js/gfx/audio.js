@@ -28,6 +28,19 @@ const Audio = (() => {
   }
   function hz(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
 
+  /* eerie detune: every so often the whole track sags down in pitch by a
+     couple of semitones and creeps back, like the tape is warping. Purely
+     a function of wall-clock audio time so lead+bass always sag together. */
+  function detuneSemitones(time) {
+    const cycle = 13;           /* seconds between sags */
+    const sagDepth = 2;         /* semitones */
+    const phase = (time % cycle) / cycle;
+    const dipStart = 0.55, dipPeak = 0.68, dipEnd = 0.92;
+    if (phase < dipStart || phase > dipEnd) return 0;
+    if (phase < dipPeak) return -sagDepth * (phase - dipStart) / (dipPeak - dipStart);
+    return -sagDepth * (1 - (phase - dipPeak) / (dipEnd - dipPeak));
+  }
+
   /* ---------------- TRACKS (original compositions) ---------------- */
   /* seq entries: [note, beats]. bpm = beats per minute. */
   const TRACKS = {
@@ -117,11 +130,11 @@ const Audio = (() => {
 
   function resume() { if (ac && ac.state === 'suspended') ac.resume(); }
 
-  function voice(kind, midi, t, dur, vol, dest) {
+  function voice(kind, midi, t, dur, vol, dest, detune) {
     const o = ac.createOscillator();
     const g = ac.createGain();
     o.type = kind;
-    o.frequency.value = hz(midi);
+    o.frequency.value = hz(midi) * Math.pow(2, (detune || 0) / 12);
     const a = 0.008, r = Math.min(0.12, dur * 0.25);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(vol, t + a);
@@ -144,8 +157,9 @@ const Audio = (() => {
         const [note, beats] = seq[trackPos[v] % seq.length];
         const dur = beats * spb;
         if (note > 0) {
-          if (v === 'lead') voice('square', note, nextTime[v], dur * 0.92, 0.10, musicGain);
-          else voice('triangle', note, nextTime[v], dur * 0.95, 0.16, musicGain);
+          const detune = detuneSemitones(nextTime[v]);
+          if (v === 'lead') voice('square', note, nextTime[v], dur * 0.92, 0.10, musicGain, detune);
+          else voice('triangle', note, nextTime[v], dur * 0.95, 0.16, musicGain, detune);
         }
         nextTime[v] += dur;
         trackPos[v]++;

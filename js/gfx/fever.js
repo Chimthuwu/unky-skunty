@@ -10,7 +10,6 @@ const Fever = (() => {
   let t = 0;
   let nextIntrusion = 3000 + Math.random() * 4000;
   let intrusion = null;   /* { key, life, x, y } */
-  let scratch = null;
 
   const INTRUSION_KEYS = [
     'intrusionSlime', 'intrusionTrain', 'intrusionStation',
@@ -43,27 +42,10 @@ const Fever = (() => {
     }
   }
 
-  /* chromatic-aberration + scanline pass: cheap, image-free, runs every frame */
+  /* faint scanlines only — static, not flickery, sells the "wrong channel"
+     vibe without the strobing chromatic-jitter this used to do */
   function glitchPass(g) {
     const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-    if (!scratch) {
-      scratch = document.createElement('canvas');
-      scratch.width = SW; scratch.height = SH;
-    }
-    const jitter = Math.sin(t / 137) > 0.985 ? 3 : (Math.sin(t / 211) < -0.99 ? -2 : 0);
-    if (jitter !== 0) {
-      const sctx = scratch.getContext('2d');
-      sctx.clearRect(0, 0, SW, SH);
-      sctx.drawImage(g.canvas, 0, 0);
-      g.save();
-      g.globalCompositeOperation = 'lighter';
-      g.globalAlpha = 0.5;
-      g.drawImage(scratch, jitter, 0);
-      g.globalAlpha = 0.35;
-      g.drawImage(scratch, -jitter, 0);
-      g.restore();
-    }
-    /* faint scanlines, always on, sells the "wrong channel" vibe */
     g.save();
     g.globalAlpha = 0.06;
     g.fillStyle = '#000000';

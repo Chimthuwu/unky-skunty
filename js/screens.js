@@ -12,6 +12,7 @@ const Screens = {
     const opts = () => {
       const o = [{ label: 'NEW GAME', act: 'new' }];
       if (SaveLoad.has()) o.push({ label: 'CONTINUE', act: 'continue' });
+      o.push({ label: 'ESCAPE THE UNCLE', act: 'escape' });
       return o;
     };
     return {
@@ -26,6 +27,8 @@ const Screens = {
           if (list[sel].act === 'new') {
             SaveLoad.clear();
             Game.screen = Screens.makeIntro();
+          } else if (list[sel].act === 'escape') {
+            Game.screen = EscapeMode.make();
           } else {
             const data = SaveLoad.load();
             if (data) { Game.startChapter(data.chapterId || 'ch1', data); }
@@ -90,7 +93,8 @@ const Screens = {
 
         /* menu */
         const list = opts();
-        UI.menu(g, SW / 2 - 52, SH - 54, 104, list.map(o => ({ label: o.label })), sel);
+        const mw = 150, mh = list.length * 12 + 8;
+        UI.menu(g, SW / 2 - mw / 2, SH - mh - 8, mw, list.map(o => ({ label: o.label })), sel);
         Font.drawCentered(g, 'Z/ENTER CONFIRM   X CANCEL   C MENU', SW / 2, SH - 8, '#485878');
       },
     };
