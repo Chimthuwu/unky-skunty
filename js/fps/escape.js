@@ -330,6 +330,30 @@ const EscapeMode = (() => {
     "back in MY day the bunnies knew their place",
   ];
 
+  /* Round two. He is not himself any more: bigger, slower to get to you
+     because he is walking your movements backwards, and talking about
+     something else entirely. Same mouth, different man. */
+  const MIRROR_TAUNTS = [
+    "you have to have children",
+    "why arent you having children",
+    "children...",
+    "children...",
+    "linux..",
+    "Javascript",
+    "England",
+    "you have to have children. why arent you having children.",
+    "install linux",
+    "Javascript is not a personality",
+    "children. linux. england. javascript.",
+    "do you have children",
+    "you should have children",
+    "Linux..",
+    "JAVASCRIPT",
+    "why wont you have children",
+    "england is a country not a personality",
+    "you have to have children",
+  ];
+
   /* ---------------- factory ---------------- */
   function make() {
     const grid = buildMap();
@@ -374,6 +398,11 @@ const EscapeMode = (() => {
       floorTiles.push(row);
     }
 
+    /* One reusable pixel buffer for the whole world pass, sized once.
+       See js/gfx/worldfb.js for why the world isn't drawn straight onto
+       the context any more. */
+    const fb = WorldFB.create(Config.SCREEN_W, Config.SCREEN_H);
+
     let px, py, pa;
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
@@ -407,6 +436,21 @@ const EscapeMode = (() => {
     const UNCLE_MAX_HP = 6;
     let uncleDead = false;
     let uncleHurtFlash = 0;
+    /* How big he draws, as a multiple of his normal size. Round two
+       nearly doubles it. */
+    let uncleScale = 1;
+
+    /* Set up a round. Everything that makes round two different —
+       his size, the taunts, the way the horde moves, the song — hangs
+       off this one function. */
+    function beginRound(n) {
+      round = n;
+      mirrored = n === 2;
+      uncleScale = mirrored ? 1.9 : 1;
+      aftermath = null;
+      Audio.setPlayback(mirrored ? { reverse: true, rate: 0.62 } : null);
+      resetRun();
+    }
 
     /* every open floor cell, used to scatter bunnies each stage */
     const floorCells = [];
@@ -479,7 +523,22 @@ const EscapeMode = (() => {
       UNCLE_SPD_MULT = 1 + (stage - 1) * 0.08;
     }
 
-    let state = 'menu';   /* menu | playing | caught | escaped */
+    let state = 'menu';   /* menu | playing | caught | aftermath | escaped */
+
+    /* Which round this is. Round one is the game as it was. Round two
+       is the same corridor with everything in it walking backwards
+       through your own movements, the song playing off, and him twice
+       the size. Dying in round two drops you back into round one
+       rather than ending the run. */
+    let round = 1;
+    let mirrored = false;
+    let aftermath = null;
+
+    function tauntPool() { return mirrored ? MIRROR_TAUNTS : TAUNTS; }
+    function pickTaunt() {
+      const pool = tauntPool();
+      return pool[(Math.random() * pool.length) | 0];
+    }
     let t = 0;
     let shotFlash = 0;
     let bunniesSlain = 0;
@@ -492,7 +551,7 @@ const EscapeMode = (() => {
     let spotFlash = 0;
     let drainT = 0, drainLen = 0, drainPeak = 0, drainNext = 6000;
     let escapedT = 0;
-    resetRun();
+    beginRound(1);
 
     /* fixed-looking but slightly-off ear positions poking in from the
        menu's edges — deliberately "wrong", never symmetric */
@@ -631,6 +690,69 @@ const EscapeMode = (() => {
       }
     }
 
+    /* ---- round two: everything walks backwards through you ----
+       None of them hunt any more. They take their cue from your
+       controls and do the opposite: you go forward, they go back; you
+       turn left, they go right; and if you stop, they stop, frozen
+       mid-stride, because nothing in this round moves unless you do.
+
+       That makes standing still a valid strategy and moving a risk,
+       which is the whole inversion of round one — in round one, moving
+       is how you survive. */
+    const MIRROR_SPD = 1.45;
+
+    function mirroredStep() {
+      const fwd = Input.down('up') ? 1 : Input.down('down') ? -1 : 0;
+      const turn = Input.down('left') ? 1 : Input.down('right') ? -1 : 0;
+      let dx = 0, dy = 0;
+      if (fwd) {
+        /* opposite of the way you are walking */
+        dx = -Math.cos(pa) * fwd; dy = -Math.sin(pa) * fwd;
+      } else if (turn) {
+        /* and opposite of the way you are turning */
+        const a = pa + (turn * Math.PI) / 2;
+        dx = Math.cos(a); dy = Math.sin(a);
+      }
+      if (dx === 0 && dy === 0) return null;
+      /* snap to the 4-way lattice everything else uses */
+      return Math.abs(dx) >= Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+    }
+
+    function updateMirrored(dt) {
+      const dtS = dt / 1000;
+      const dir = mirroredStep();
+      const walking = dir !== null;
+      /* with no input they get dtS 0, which parks them exactly where
+         they are — including halfway through a step */
+      const step = dtS * MIRROR_SPD;
+
+      const choose = (e) => {
+        if (!dir) return;
+        const nx = e.cx + dir[0], ny = e.cy + dir[1];
+        /* if the mirrored direction is blocked they simply do not move;
+           watching a whole room stall against a wall is part of it */
+        if (isOpenCell(grid, nx, ny)) { e.stepX = nx; e.stepY = ny; }
+      };
+
+      for (const e of [uncle, ...bunnies, ...nightmares]) {
+        if (e.dead) continue;
+        e.wobble += dtS;
+        e.pathT -= dt;
+        advanceMover(e, walking ? step : 0, 1, choose);
+        e.moved = false;
+        if (Math.hypot(e.x - px, e.y - py) < catchRadius) {
+          hurtPlayer(e === uncle ? UNCLE_DMG : (e.kind ? NIGHTMARE_DMG : BUNNY_DMG));
+        }
+      }
+
+      /* he still sees you, he just comes at it from the wrong direction —
+         the HUD keeps telling the truth about it */
+      if (!uncleDead) {
+        if (hasLOS(grid, uncle.x, uncle.y, px, py)) uncle.alert = 2.5;
+        else uncle.alert = Math.max(0, uncle.alert - dtS);
+      }
+    }
+
     const PROJ_SPD = 9, PROJ_LIFE = 900, PROJ_HIT_R = 0.32;
 
     function shoot() {
@@ -705,6 +827,26 @@ const EscapeMode = (() => {
       if (state === 'caught') {
         caughtT += dt;
         if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
+        /* the death card holds for a beat, then the screen comes apart */
+        if (caughtT > 1400 && !aftermath) {
+          aftermath = Aftermath.create(Config.SCREEN_W, Config.SCREEN_H);
+          state = 'aftermath';
+        }
+        return;
+      }
+      if (state === 'aftermath') {
+        if (!aftermath) aftermath = Aftermath.create(Config.SCREEN_W, Config.SCREEN_H);
+        aftermath.update(dt, Input);
+        /* cancel skips the cutscene — nobody should be trapped in one */
+        if (Input.pressed('cancel') && aftermath.phase !== 'done') {
+          while (!aftermath.done) aftermath.update(200, { down: () => false, pressed: () => false });
+        }
+        if (aftermath.done) {
+          /* round two falls back to round one, and round one back to
+             round two — dying is a corridor, not an ending */
+          beginRound(round === 1 ? 2 : 1);
+          state = 'playing';
+        }
         return;
       }
       if (state === 'escaped') {
@@ -732,14 +874,18 @@ const EscapeMode = (() => {
       if (Input.down('down')) tryMove(px - Math.cos(pa) * MOVE_SPD * dtS, py - Math.sin(pa) * MOVE_SPD * dtS);
       if (Input.pressed('confirm')) shoot();
 
-      updateUncle(dt);
-      updateBunnies(dt);
-      updateNightmares(dt);
+      if (mirrored) {
+        updateMirrored(dt);
+      } else {
+        updateUncle(dt);
+        updateBunnies(dt);
+        updateNightmares(dt);
+      }
       updateProjectiles(dt);
 
       nextTaunt -= dt;
       if (nextTaunt <= 0) {
-        tauntText = TAUNTS[(Math.random() * TAUNTS.length) | 0];
+        tauntText = pickTaunt();
         tauntT = 3200;
         nextTaunt = 7000 + Math.random() * 6000;
       }
@@ -750,13 +896,44 @@ const EscapeMode = (() => {
       }
       if (bunnies.length && bunnies.every(b => b.dead)) {
         nextStage();
-        tauntText = TAUNTS[(Math.random() * TAUNTS.length) | 0];
+        tauntText = pickTaunt();
         tauntT = 3200;
       }
     }
 
+    /* ---------------- Uncle's art and motion ----------------
+       The three big pieces of art (104x140 attack, 64x96 hurt and
+       victory) are the only full-body Uncle there is; the 16x16 map
+       sprites are kept only as a fallback for when they fail to load.
+       Stretched to billboard size those 16 pixels read as a smear, which
+       is what he looked like before. */
+    function uncleBase() {
+      return uncle.alert > 0 ? Assets.getImage('scunterMapRun') : Assets.getImage('scunterMapIdle');
+    }
+    function uncleSprite() {
+      if (uncleHurtFlash > 0) return Assets.getImage('scunterHurt') || uncleBase();
+      if (uncle.alert > 0) return Assets.getImage('scunterAttack') || uncleBase();
+      return Assets.getImage('scunterVictory') || uncleBase();
+    }
+
+    /* There is no walk cycle to play — the art is single frames — so the
+       motion is synthesised instead: a slow breath, a limp that only
+       shows while he's actually crossing a cell, and a lean into the
+       direction of travel. All continuous, so nothing pops between
+       poses the way swapping two stills every 150ms did. */
+    function uncleMotion() {
+      const moving = uncle.stepT < 1;
+      const gait = moving ? Math.sin(t / 110) : 0;
+      const breath = Math.sin(t / 620);
+      return {
+        bob: gait * 1.6 + breath * 0.8,
+        lean: moving ? gait * 0.035 : breath * 0.006,
+        squash: 1 + (moving ? -Math.abs(gait) * 0.02 : breath * 0.012),
+      };
+    }
+
     /* ---------------- raycast render ---------------- */
-    function drawScene(g) {
+    function drawScene(g, drain) {
       const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
       const horizon = SH / 2;
 
@@ -764,140 +941,32 @@ const EscapeMode = (() => {
          the old flat ceiling is replaced by open sky — which is also why
          the wall's *base* still sits below the horizon and the floor stays
          visible underneath it. Removing the ceiling without keeping that
-         base would leave no ground plane at all. */
-      const sky = g.createLinearGradient(0, 0, 0, horizon);
-      sky.addColorStop(0, '#120c18');
-      sky.addColorStop(1, '#3a2028');
-      g.fillStyle = sky; g.fillRect(0, 0, SW, horizon);
+         base would leave no ground plane at all.
 
-      /* Per-column ray directions, needed by both the wall and the floor
-         pass. Computed once up front rather than twice. */
-      const rayDirX = new Float64Array(SW), rayDirY = new Float64Array(SW);
-      for (let col = 0; col < SW; col++) {
-        const rayA = pa + ((2 * col / SW) - 1) * (FOV / 2);
-        rayDirX[col] = Math.cos(rayA);
-        rayDirY[col] = Math.sin(rayA);
-      }
+         Sky, ground and walls are composited into a pixel buffer and handed
+         over in a single putImageData. They used to be drawn straight onto
+         the context — a drawImage per floor run, up to four per wall column,
+         a fillRect per column for the fog — which came to about two
+         thousand canvas calls a frame and was the entire frame budget. */
+      fb.render({
+        W, H, grid, wallTiles, floorTiles,
+        px, py, pa, FOV,
+        drain: drain / 100,
+      });
+      fb.present(g);
 
-      /* ---- ground ----
-         Proper floor casting: for each screen row below the horizon the
-         distance to the floor is fixed, so walking across that row you
-         step through floor cells in runs. Each run is one drawImage of a
-         single texel stretched to the run's width, which keeps this to a
-         few hundred calls instead of one per pixel. */
-      for (let y = horizon + 1; y < SH; y++) {
-        const rowDist = (0.5 * SH) / (y - horizon);
-        let runStart = 0, runCell = -1, runTile = null, runTX = 0, runTY = 0;
-        for (let col = 0; col <= SW; col++) {
-          let cell = -1, tile = null, tX = 0, tY = 0;
-          if (col < SW) {
-            const fx = px + rowDist * rayDirX[col];
-            const fy = py + rowDist * rayDirY[col];
-            const cx = Math.floor(fx), cy = Math.floor(fy);
-            if (cx >= 0 && cy >= 0 && cx < W && cy < H) {
-              tile = floorTiles[cy][cx];
-              if (tile) {
-                cell = cy * W + cx;
-                tX = Math.min(tile.width - 1, ((fx - cx) * tile.width) | 0);
-                tY = Math.min(tile.height - 1, ((fy - cy) * tile.height) | 0);
-              }
-            }
-          }
-          if (cell !== runCell) {
-            if (runTile) {
-              g.drawImage(runTile, runTX, runTY, 1, 1, runStart, y, col - runStart, 1);
-            }
-            runStart = col; runCell = cell; runTile = tile; runTX = tX; runTY = tY;
-          }
-        }
-        /* same falloff as the walls, so the ground recedes with them */
-        const fshade = Math.max(0.12, 1 - rowDist / 9);
-        if (fshade < 0.99) {
-          g.fillStyle = `rgba(10,6,14,${(1 - fshade).toFixed(3)})`;
-          g.fillRect(0, y, SW, 1);
-        }
-      }
-
-      const zbuf = new Float32Array(SW);
-      const MAX_SLICES = 4;
-      for (let col = 0; col < SW; col++) {
-        const camX = (2 * col / SW) - 1;
-        const rayA = pa + camX * (FOV / 2);
-        const rdx = rayDirX[col], rdy = rayDirY[col];
-        let mx = Math.floor(px), my = Math.floor(py);
-        const deltaX = Math.abs(1 / (rdx || 1e-9)), deltaY = Math.abs(1 / (rdy || 1e-9));
-        let stepX, sideX, stepY, sideY;
-        if (rdx < 0) { stepX = -1; sideX = (px - mx) * deltaX; } else { stepX = 1; sideX = (mx + 1 - px) * deltaX; }
-        if (rdy < 0) { stepY = -1; sideY = (py - my) * deltaY; } else { stepY = 1; sideY = (my + 1 - py) * deltaY; }
-        let side = 0, hit = false, dist = 6;
-        for (let i = 0; i < 64; i++) {
-          if (sideX < sideY) { sideX += deltaX; mx += stepX; side = 0; }
-          else { sideY += deltaY; my += stepY; side = 1; }
-          if (mx < 0 || my < 0 || mx >= W || my >= H || grid[my][mx] === 1) {
-            dist = side === 0 ? (mx - px + (1 - stepX) / 2) / (rdx || 1e-9) : (my - py + (1 - stepY) / 2) / (rdy || 1e-9);
-            hit = true; break;
-          }
-        }
-        /* keep the perpendicular distance for the texture lookup — the
-           fisheye correction below is for screen position only */
-        const perp = dist;
-        dist = Math.max(0.05, dist * Math.cos(rayA - pa));
-        zbuf[col] = dist;
-        if (!hit) continue;
-
-        const lineH = Math.min(SH * 3, SH / dist);
-        const yBase = Math.min(SH, horizon + lineH / 2);
-
-        const tex = (mx >= 0 && my >= 0 && mx < W && my < H) ? wallTiles[my][mx] : null;
-        if (tex) {
-          /* where along the wall face this column lands, 0..1 */
-          let wallX = side === 0 ? (py + perp * rdy) : (px + perp * rdx);
-          wallX -= Math.floor(wallX);
-          const tw = tex.width;
-          const texX = Math.min(tw - 1, (wallX * tw) | 0);
-          /* Tile the texture down the face, one copy per lineH of screen.
-             Capped at MAX_SLICES copies and then stretched to fill the
-             rest: without the cap a distant wall wanted ~6 slices per
-             column, which is over a thousand drawImage calls a frame for
-             detail nobody can resolve at 240x160. */
-          const want = Math.ceil(yBase / lineH);
-          const n = Math.max(1, Math.min(MAX_SLICES, want));
-          const sliceH = yBase / n;
-          for (let i = 0; i < n; i++) {
-            const y = i * sliceH;
-            g.drawImage(tex, texX, 0, 1, tex.height, col, y, 1, sliceH + 0.5);
-          }
-        } else {
-          /* flat-shaded stand-in, so the world stays readable even if the
-             tile art somehow isn't available */
-          const shade = Math.max(0.12, 1 - dist / 9);
-          const base = side === 1 ? [96, 48, 80] : [128, 64, 104];
-          g.fillStyle = `rgb(${(base[0] * shade) | 0},${(base[1] * shade) | 0},${(base[2] * shade) | 0})`;
-          g.fillRect(col, 0, 1, yBase);
-        }
-
-        /* distance falloff, applied over the texture rather than by
-           fading the sprite alpha, so it darkens toward black instead of
-           toward whatever is behind it */
-        const shade = Math.max(0.12, 1 - dist / 9);
-        if (shade < 0.99) {
-          g.fillStyle = `rgba(10,6,14,${(1 - shade).toFixed(3)})`;
-          g.fillRect(col, 0, 1, yBase);
-        }
-        /* a touch of extra darkening on the N/S faces so corners read */
-        if (side === 1) {
-          g.fillStyle = 'rgba(10,6,14,0.18)';
-          g.fillRect(col, 0, 1, yBase);
-        }
-      }
+      /* the depth buffer the framebuffer filled in, for sprite occlusion */
+      const zbuf = fb.zbuf;
 
       /* ---- billboard sprites (bunnies + Uncle), painter's algorithm ---- */
       const sprites = [];
       for (const b of bunnies) if (!b.dead) sprites.push({ x: b.x, y: b.y, img: bunnySprite(), scale: 0.8 });
-      const uImg = uncle.alert > 0
-        ? ((Math.floor(t / 150) % 2 === 0) ? Assets.getImage('scunterMapRun') : Assets.getImage('scunterMapWalk'))
-        : ((Math.floor(t / 400) % 2 === 0) ? Assets.getImage('scunterMapIdle') : Assets.getImage('scunterMapWalk'));
-      sprites.push({ x: uncle.x, y: uncle.y, img: uImg, scale: 1.35, uncle: true });
+      sprites.push({
+        x: uncle.x, y: uncle.y,
+        img: uncleSprite(),
+        scale: uncleScale * (uncle.alert > 0 ? 1.65 : 1.5),
+        motion: uncleMotion(),
+      });
       for (const p of projectiles) sprites.push({ x: p.x, y: p.y, img: bulletSprite(), scale: 0.16, glow: true });
       for (const nm of nightmares) {
         if (nm.dead) continue;
@@ -916,14 +985,26 @@ const EscapeMode = (() => {
         const screenX = Math.floor((SW / 2) * (1 + tx / ty));
         const spriteH = Math.abs(Math.floor(SH / ty * s.scale));
         const spriteW = spriteH * (s.img.width / s.img.height);
-        const drawStartY = horizon - spriteH / 2, drawStartX = screenX - spriteW / 2;
         const sampleCol = Math.max(0, Math.min(SW - 1, screenX));
         if (ty > zbuf[sampleCol] + 0.15) continue; /* behind a wall */
         g.save();
         g.globalAlpha = Math.max(0.25, 1 - ty / 9);
         if (s.glow) g.globalCompositeOperation = 'lighter';
         g.imageSmoothingEnabled = false;
-        g.drawImage(s.img, drawStartX, drawStartY, spriteW, spriteH);
+        if (s.motion) {
+          /* Uncle stands on the floor rather than floating at eye level:
+             feet on the horizon line, then a slow breath, a limp on the
+             move, and a lean into wherever he's walking. Drawn as a
+             transform around the feet so the art is scaled once, never
+             resampled twice. */
+          const m = s.motion;
+          g.translate(screenX, horizon + m.bob);
+          if (m.lean) g.rotate(m.lean);
+          if (m.squash !== 1) g.scale(1 / m.squash, m.squash);
+          g.drawImage(s.img, -spriteW / 2, -spriteH, spriteW, spriteH);
+        } else {
+          g.drawImage(s.img, screenX - spriteW / 2, horizon - spriteH / 2, spriteW, spriteH);
+        }
         g.restore();
       }
 
@@ -1012,9 +1093,17 @@ const EscapeMode = (() => {
 
       if (state === 'menu') { drawMenu(g); return; }
 
+      /* the death sequence owns the screen outright while it runs */
+      if (state === 'aftermath' && aftermath) { aftermath.draw(g); return; }
+
       const drain = colorDrainAmount();
+      /* The world carries its own bleach, composited per pixel in the
+         framebuffer, so this filter is only here for the sprites and HUD
+         drawn over the top of it. It used to be set *before* the world
+         pass, which meant every one of the two thousand draw calls
+         underneath it was being pushed through a filter as well. */
       if (drain > 1) g.filter = `grayscale(${drain.toFixed(0)}%)`;
-      drawScene(g);
+      drawScene(g, drain);
 
       /* hurt vignette — a soft edge bloom, never a full-screen tint, so
          taking a hit can't become a strobe under repeated contact */
@@ -1129,6 +1218,7 @@ const EscapeMode = (() => {
     function debugState() {
       return {
         px, py, pa, state, stage, playerHP, uncleDead, escapedT,
+        round, mirrored, uncleScale,
         uncle: {
           x: uncle.x, y: uncle.y, cx: uncle.cx, cy: uncle.cy, hp: uncle.hp,
           alert: uncle.alert, dead: uncleDead,
@@ -1140,7 +1230,13 @@ const EscapeMode = (() => {
       };
     }
 
-    return { name: 'escape', update, draw, _debug: debugState };
+    return {
+      name: 'escape', update, draw, _debug: debugState,
+      /* the harness asserts on the death sequence's phase and on which
+         taunt pool is live; both are read-only views, same as _debug */
+      _phase: () => (aftermath ? aftermath.phase : ''),
+      _taunts: () => tauntPool(),
+    };
   }
 
   return { make };

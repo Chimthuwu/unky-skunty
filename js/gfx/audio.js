@@ -174,18 +174,42 @@ const Audio = (() => {
      while the tempo is sliding. */
   const GHOST_SEMITONES = 1;
 
+  /* ---- playback warping ----
+     The music is sequenced, not sampled, so "backwards" and "slow" are
+     things the scheduler can actually do rather than things a file
+     player could: `reverse` walks each sequence from the end, and
+     `rate` stretches every note. Used for the second round, where the
+     song is the same song played wrong. Defaults are inert, so every
+     other track behaves exactly as before. */
+  let playReverse = false;
+  let playRate = 1;
+
+  function setPlayback(opts) {
+    opts = opts || {};
+    playReverse = !!opts.reverse;
+    const rate = opts.rate == null ? 1 : opts.rate;
+    playRate = rate > 0 ? rate : 1;
+    /* rebase the tempo immediately so the change is heard on the next
+       note rather than after the drift glide finishes */
+    if (ac && current && TRACKS[current]) {
+      const base = TRACKS[current].bpm * playRate;
+      bpmNow = base; bpmTarget = base;
+    }
+  }
+
   function scheduler() {
     if (!current) return;
     const tr = TRACKS[current];
     if (!tr) return;
     if (!bpmNow) { bpmNow = tr.bpm; bpmTarget = tr.bpm; nextTempoRoll = ac.currentTime + 4; }
-    const spb = 60 / stepTempo();
+    const spb = 60 / (stepTempo() * playRate);
     const ahead = ac.currentTime + 0.35;
     for (const v of ['lead', 'bass']) {
       const seq = tr[v];
       if (!seq) continue;
       while (nextTime[v] < ahead) {
-        const [note, beats] = seq[trackPos[v] % seq.length];
+        const at = trackPos[v] % seq.length;
+        const [note, beats] = seq[playReverse ? seq.length - 1 - at : at];
         const dur = beats * spb;
         if (note > 0) {
           const detune = detuneSemitones(nextTime[v]);
@@ -212,7 +236,10 @@ const Audio = (() => {
     if (schedTimer) clearInterval(schedTimer);
     const tr = TRACKS[name];
     if (!tr) return;
-    bpmNow = tr.bpm; bpmTarget = tr.bpm;   /* reset drift on track change */
+    /* reset drift on track change, but a track change inherits whatever
+       warping is currently in force — the second round's song is still
+       the same song, just wrong */
+    bpmNow = tr.bpm * playRate; bpmTarget = bpmNow;
     nextTempoRoll = ac.currentTime + 4;
     lastDuck = null;
     schedTimer = setInterval(scheduler, 120);
@@ -303,5 +330,9 @@ const Audio = (() => {
     select:   () => blip(740, 0.06, 'square', 0.14),
   };
 
-  return { startMusic, stopMusic, SFX, toggleMute, init, resume, duckMusic, TRACKS, get muted() { return muted; } };
+  return {
+    startMusic, stopMusic, setPlayback, SFX, toggleMute, init, resume, duckMusic, TRACKS,
+    get muted() { return muted; },
+    get playback() { return { reverse: playReverse, rate: playRate }; },
+  };
 })();

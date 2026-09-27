@@ -44,13 +44,22 @@ const Fever = (() => {
 
   /* faint scanlines only — static, not flickery, sells the "wrong channel"
      vibe without the strobing chromatic-jitter this used to do */
-  function glitchPass(g) {
+  let scanCanvas = null;
+  function scanlines() {
+    if (scanCanvas) return scanCanvas;
     const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
-    g.save();
-    g.globalAlpha = 0.06;
-    g.fillStyle = '#000000';
+    const c = document.createElement('canvas');
+    c.width = SW; c.height = SH;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.06)';
     for (let y = 0; y < SH; y += 2) g.fillRect(0, y, SW, 1);
-    g.restore();
+    scanCanvas = c;
+    return c;
+  }
+  /* the pattern never changes, so it is built once and blitted — it used
+     to be eighty fillRects of full screen width, every frame, forever */
+  function glitchPass(g) {
+    g.drawImage(scanlines(), 0, 0);
   }
 
   function drawIntrusion(g) {

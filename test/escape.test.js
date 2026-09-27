@@ -27,11 +27,38 @@ function makeCtxStub() {
     save: noop, restore: noop, translate: noop, scale: noop, rotate: noop, fillText: noop,
     measureText: () => ({ width: 0 }),
     createLinearGradient: () => grad, createRadialGradient: () => grad, createPattern: () => null,
+    putImageData: noop,
+    getImageData: (x, y, w, h) => texelPattern(x, y, w, h),
   };
+}
+/* Tiles are read back with getImageData so the world pass can sample them
+   as pixels. A real 2D context would return the tile's art; the stub
+   returns a deterministic pattern instead, which is enough to tell
+   "textured" apart from "one flat colour" — which is all the render
+   assertions need. */
+function texelPattern(x, y, w, h) {
+  const img = makeImageDataStub(w, h);
+  const d = img.data;
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const i = (yy * w + xx) * 4;
+      d[i] = (xx * 37 + yy * 11) & 255;
+      d[i + 1] = (xx * 5 + yy * 61) & 255;
+      d[i + 2] = (xx * 91 + yy * 23) & 255;
+      d[i + 3] = 255;
+    }
+  }
+  return img;
 }
 const makeCanvasStub = () => ({
   width: 0, height: 0, style: {}, addEventListener: () => {}, getContext: () => makeCtxStub(),
 });
+
+/* The world pass composites into one of these and blits it with a single
+   putImageData, so the stub has to hand back a real buffer. */
+function makeImageDataStub(w, h) {
+  return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
+}
 
 const audioLog = { notes: [] };
 let CLOCK = 0;
@@ -73,13 +100,15 @@ function buildSandbox() {
     },
     document: { getElementById: () => makeCanvasStub(), createElement: () => makeCanvasStub(), addEventListener: () => {} },
     navigator: { getGamepads: () => [] },
+    ImageData: makeImageDataStub,
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   const ORDER = [
     'js/core/utils.js', 'js/core/config.js', 'js/gfx/font.js', 'js/gfx/charart.js',
-    'js/gfx/tiles.js', 'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js',
-    'js/gfx/fever.js', 'js/fps/escape.js',
+    'js/gfx/tiles.js', 'js/gfx/worldfb.js', 'js/gfx/audio.js', 'js/gfx/input.js',
+    'js/gfx/assets.js', 'js/gfx/fever.js', 'js/gfx/matrix.js', 'js/fps/tactics.js',
+    'js/fps/aftermath.js', 'js/fps/escape.js',
   ];
   for (const f of ORDER) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), sandbox, { filename: f });
@@ -144,22 +173,91 @@ console.log('\nplayer can be hurt, and dies');
   /* stand still and let them come: i-frames mean a crowd can't instakill */
   const d = dbg();
   check('player took damage', d.playerHP < 100, 'HP ' + d.playerHP + '/100');
-  check('player died and the run ended', d.state === 'caught', 'state=' + d.state);
+  /* death runs a short card and then hands over to the death sequence,
+     so by now the state may legitimately have moved on */
+  check('player died and the run ended', d.state === 'caught' || d.state === 'aftermath',
+    'state=' + d.state);
+}
+
+console.log('\nthe death sequence runs and hands back a live run');
+{
+  /* drive it to the end: the board phase trips on the first committed
+     move, and cancel skips the rest, so this is the fast path through */
+  const seen = new Set();
+  for (let i = 0; i < 4000 && dbg().state === 'aftermath'; i++) {
+    /* confirm is what commits a move on the board */
+    press('confirm');
+    frame();
+    const s = vm.runInContext('__scr._phase()', sandbox);
+    if (s) seen.add(s);
+  }
+  check('it reached the tactics board', seen.has('board'),
+    'phases seen: ' + Array.from(seen).join(' -> '));
+  check('the first move inverted the colours', seen.has('invert'),
+    'phases seen: ' + Array.from(seen).join(' -> '));
+  const after = dbg();
+  check('it respawned the player into a live run', after.state === 'playing',
+    'state=' + after.state + ' HP ' + after.playerHP);
+  check('the respawn is round two', after.round === 2, 'round ' + after.round);
+}
+
+console.log('\nround two mirrors the player instead of hunting');
+{
+  const d0 = dbg();
+  const before = d0.bunnies.map(b => ({ x: b.x, y: b.y }));
+
+  /* stand perfectly still: nothing in the room may move */
+  setInput('() => false', '() => false');
+  for (let i = 0; i < 120; i++) frame();
+  const still = dbg();
+  const drift = still.bunnies.reduce((m, b, i) =>
+    Math.max(m, Math.abs(b.x - before[i].x) + Math.abs(b.y - before[i].y)), 0);
+  check('enemies freeze when the player does not move', drift < 1e-9,
+    'worst drift ' + drift.toFixed(4) + ' cells over 120 frames');
+
+  /* now walk: they have to move, and opposite to us */
+  const px0 = dbg().px, py0 = dbg().py;
+  setInput('() => false', '(n) => n === "up"');
+  for (let i = 0; i < 60; i++) frame();
+  const moved = dbg();
+  const anyMoved = moved.bunnies.some((b, i) =>
+    Math.abs(b.x - still.bunnies[i].x) + Math.abs(b.y - still.bunnies[i].y) > 1e-9);
+  check('enemies move once the player does', anyMoved);
+  /* our heading was +x-ish; theirs must be -x-ish */
+  const rel = moved.bunnies.map((b, i) => (b.x - still.bunnies[i].x) * Math.sign(moved.px - px0 || 1));
+  check('they move against the player, not with them', rel.every(v => v <= 1e-9),
+    'deltas ' + moved.bunnies.map((b, i) => (b.x - still.bunnies[i].x).toFixed(2)).join(' '));
+  setInput('() => false', '() => false');
+}
+
+console.log('\nhe is bigger in round two, and still says the other thing');
+{
+  const d = dbg();
+  check('Uncle draws larger in round two', d.uncleScale > 1.5, 'scale ' + d.uncleScale);
+  const taunts = vm.runInContext('__scr._taunts()', sandbox);
+  check('round two has its own taunts', taunts.some(t => /children|linux|javascript|england/i.test(t)),
+    taunts.length + ' taunts, e.g. "' + taunts[0] + '"');
+  check('the song is warped, not just different', vm.runInContext('Audio.playback.reverse', sandbox)
+    && vm.runInContext('Audio.playback.rate', sandbox) < 1,
+    JSON.stringify(vm.runInContext('Audio.playback', sandbox)));
 }
 
 console.log('\nUncle is killable and there is a win state');
 {
-  /* back to a live run: the death screen needs a confirm to reach the
-     menu, and another to start playing */
+  /* back to a live run. If the previous section left us inside the death
+     sequence, cancel skips it — and since round two falls back to round
+     one, that also puts us back on the board this section is testing. */
   setInput('() => false', '() => false');
+  for (let i = 0; i < 400 && dbg().state === 'aftermath'; i++) { press('cancel'); frame(); }
   for (let i = 0; i < 200 && dbg().state !== 'playing'; i++) {
     press('confirm'); frame(); frame();
   }
-  check('a fresh run starts', dbg().state === 'playing', 'state=' + dbg().state);
-
+  check('a fresh run starts', dbg().state === 'playing', 'state=' + dbg().state + ' round ' + dbg().round);
   const angDiff = (a, b) => { let x = (a - b) % (Math.PI * 2); if (x > Math.PI) x -= Math.PI * 2; if (x < -Math.PI) x += Math.PI * 2; return x; };
   let minHp = 99, escaped = false, evade = 0, lastHp = dbg().playerHP;
-  for (let i = 0; i < 40000; i++) {
+  /* bounded: in round two nothing ever reaches the player, so without a
+     ceiling this would grind the whole 40000 out */
+  for (let i = 0; i < 6000; i++) {
     const d = dbg();
     if (d.state === 'escaped') { escaped = true; break; }
     if (d.state !== 'playing') break;
@@ -198,40 +296,57 @@ console.log('\nUncle is killable and there is a win state');
      checking at all. The kill-to-escaped path is a known coverage gap
      that needs a human in a real browser. */
   console.log('  ----  ' + (escaped ? 'bot soloed Uncle' : 'bot did NOT solo Uncle')
-    + ' (lowest HP seen: ' + minHp + '/6, final state: ' + dbg().state + ')');
+    + ' (round ' + dbg().round + ', lowest HP seen: ' + minHp + '/6, final state: ' + dbg().state + ')');
   console.log('    NOT GATED — see the note above. Verify by hand in a browser.');
 }
 
 console.log('\ntextured walls, no ceiling');
 {
-  /* the wall pass slices a 16x16 terrain tile per screen column and tiles
-     it down the face; a 9-argument drawImage is that slice. Count them to
-     prove the Fire Emblem tile art is actually reaching the raycaster
-     rather than silently falling back to flat fill. */
+  /* The world is composited into a pixel buffer and handed over with one
+     putImageData, so the assertions are made on the pixels themselves
+     rather than on the shape of the canvas calls that produced them. */
   const g = makeCtxStub();
-  let slices = 0, floorTexels = 0;
-  const origDraw = g.drawImage;
-  g.drawImage = function () {
-    /* both passes use the 9-arg source-rect form; they differ in the
-       source rect — walls slice a full-height column (1 x texH), the
-       ground stretches a single 1x1 texel across a run */
-    if (arguments.length >= 9) {
-      if (arguments[3] === 1 && arguments[4] === 1) floorTexels++; else slices++;
-    }
-    return origDraw.apply(this, arguments);
-  };
+  let frameImg = null, presents = 0;
+  g.putImageData = (img) => { frameImg = img; presents++; };
   vm.runInContext('__ctx = __CTX2;', Object.assign(sandbox, { __CTX2: g }));
   for (let i = 0; i < 10; i++) {
     vm.runInContext('__scr.update(16); __scr.draw(__ctx);', sandbox);
     for (const f of intervals) f();
     CLOCK += 0.016;
   }
-  check('walls are drawn with sliced terrain tiles', slices > 100,
-    slices + ' textured slices over 10 frames');
+
+  check('the world is composited once per frame', presents === 10,
+    presents + ' putImageData over 10 frames');
+
+  const W = 240, H = 160, horizon = H / 2;
+  const px = (x, y) => frameImg.data[(y * W + x) * 4];
+  const distinctInRow = (y, from, to) => {
+    const seen = new Set();
+    for (let x = from; x < to; x++) {
+      const i = (y * W + x) * 4;
+      seen.add((frameImg.data[i] << 16) | (frameImg.data[i + 1] << 8) | frameImg.data[i + 2]);
+    }
+    return seen.size;
+  };
+  const distinctAll = () => {
+    const seen = new Set();
+    for (let i = 0; i < frameImg.data.length; i += 4) {
+      seen.add((frameImg.data[i] << 16) | (frameImg.data[i + 1] << 8) | frameImg.data[i + 2]);
+    }
+    return seen.size;
+  };
+
+  /* a flat-shaded fallback would give a couple of colours per row at most;
+     real tile art gives one per texel */
+  const groundColours = Math.max(distinctInRow(H - 3, 0, W), distinctInRow(H - 8, 0, W));
+  check('ground is cast with Ashenreach grass/water tiles', groundColours > 8,
+    groundColours + ' distinct colours across the near ground');
+  check('walls are textured rather than flat-shaded', distinctAll() > 60,
+    distinctAll() + ' distinct colours in the frame');
   check('walls run to the top of the screen (no roof)', true,
     'sky replaces the old ceiling; wall base still below the horizon');
-  check('ground is cast with Ashenreach grass/water tiles', floorTexels > 100,
-    floorTexels + ' floor texels over 10 frames');
+  check('the frame is not blank', px(0, 0) !== px(0, H - 1) || distinctAll() > 1,
+    'top-left ' + px(0, 0) + ' vs bottom-left ' + px(0, H - 1));
 }
 
 console.log('\nmusic layering');

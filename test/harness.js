@@ -23,10 +23,21 @@ function makeCtxStub() {
     fillText: noop, measureText: () => ({ width: 0 }),
     createLinearGradient: () => grad,
     createPattern: () => null,
+    /* the world pass composites into a pixel buffer and hands it over in
+       one putImageData; glyphs and scanlines are stamped into offscreen
+       canvases and read back with getImageData */
+    putImageData: noop,
+    getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
   };
 }
 function makeCanvasStub() {
   return { width: 0, height: 0, style: {}, addEventListener: () => {}, getContext: () => makeCtxStub() };
+}
+
+/* the world pass composites into one of these and blits it with a single
+   putImageData, so the stub has to hand back a real buffer */
+function makeImageDataStub(w, h) {
+  return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
 }
 
 /* ---- WebAudio stub: counts scheduled notes so we can prove the ghost
@@ -85,6 +96,7 @@ function buildSandbox() {
     },
     window: windowStub, document: documentStub,
     navigator: { getGamepads: () => [] },
+    ImageData: makeImageDataStub,
     AudioContext: FakeCtx,
     __listeners: listeners, __audiolog: log,
   };
@@ -95,8 +107,9 @@ function buildSandbox() {
 
 const ORDER = [
   'js/core/utils.js', 'js/core/config.js', 'js/gfx/font.js', 'js/gfx/charart.js',
-  'js/gfx/tiles.js', 'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js',
-  'js/gfx/fever.js', 'js/fps/escape.js',
+  'js/gfx/tiles.js', 'js/gfx/worldfb.js', 'js/gfx/audio.js', 'js/gfx/input.js',
+  'js/gfx/assets.js', 'js/gfx/fever.js', 'js/gfx/matrix.js', 'js/fps/tactics.js',
+  'js/fps/aftermath.js', 'js/fps/escape.js',
 ];
 
 function load(sandbox) {

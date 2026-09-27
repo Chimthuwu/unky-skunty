@@ -72,6 +72,42 @@ const Font = (() => {
 
   const W = 5, H = 7, GAP = 1;
 
+  /* Glyphs are stamped one lit pixel at a time, which is the obvious way
+     to draw a bitmap font and also, on the title screen, seventeen hundred
+     fillRects a frame — the font was costing more than the entire 3D
+     world did. So each glyph is stamped once into a small canvas, tinted
+     to the colour and scale it was asked for, and after that a character
+     costs a single drawImage. The cache is keyed by colour and scale; the
+     game uses a dozen or so combinations and never grows. */
+  const atlasCache = new Map();
+
+  function atlas(color, scale) {
+    const key = color + '|' + scale;
+    let a = atlasCache.get(key);
+    if (a) return a;
+
+    const chars = Object.keys(G);
+    const cw = W * scale, ch = H * scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = cw * chars.length;
+    canvas.height = ch;
+    const g = canvas.getContext('2d');
+    g.fillStyle = color;
+    chars.forEach((chr, i) => {
+      const rows = G[chr];
+      const ox = i * cw;
+      for (let r = 0; r < H; r++) {
+        const bits = rows[r];
+        for (let c = 0; c < W; c++) {
+          if (bits & (0x10 >> c)) g.fillRect(ox + c * scale, r * scale, scale, scale);
+        }
+      }
+    });
+    a = { canvas, chars, cw, ch, index: new Map(chars.map((c, i) => [c, i])) };
+    atlasCache.set(key, a);
+    return a;
+  }
+
   function width(text, scale) {
     scale = scale || 1;
     return String(text).length * (W + GAP) * scale - GAP * scale;
@@ -80,21 +116,12 @@ const Font = (() => {
   function draw(ctx, text, x, y, color, scale) {
     scale = scale || 1;
     color = color || '#e8e8d0';
-    ctx.fillStyle = color;
+    const a = atlas(color, scale);
     let cx = x;
     for (const raw of String(text)) {
       const ch = G[raw] ? raw : raw.toUpperCase();
-      const rows = G[ch];
-      if (rows) {
-        for (let r = 0; r < H; r++) {
-          const bits = rows[r];
-          for (let c = 0; c < W; c++) {
-            if (bits & (0x10 >> c)) {
-              ctx.fillRect(cx + c * scale, y + r * scale, scale, scale);
-            }
-          }
-        }
-      }
+      const i = a.index.get(ch);
+      if (i !== undefined) ctx.drawImage(a.canvas, i * a.cw, 0, a.cw, a.ch, cx, y, a.cw, a.ch);
       cx += (W + GAP) * scale;
     }
   }
