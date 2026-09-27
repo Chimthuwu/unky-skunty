@@ -25,6 +25,10 @@
 
   /* ---------- boot ---------- */
   Game.screen = Screens.makeTitle();
+  Assets.init().then(() => {
+    CharArt.setImagePortrait('vosk', Assets.getImage('scunterGb'));
+    CharArt.setImageSprite('scunter', [Assets.getImage('scunterMapIdle'), Assets.getImage('scunterMapWalk')]);
+  });
 
   /* first user gesture unlocks audio */
   const unlock = () => { if (Audio.init()) Audio.resume(); };
@@ -54,6 +58,8 @@
         Game.screen.draw(ctx);
       }
       Debug.draw(ctx);
+      Fever.update(dt);
+      Fever.drawOverlay(ctx);
     } catch (err) {
       /* show errors on-screen instead of a black screen */
       console.error(err);

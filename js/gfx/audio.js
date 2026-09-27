@@ -234,5 +234,5 @@ const Audio = (() => {
     select:   () => blip(740, 0.06, 'square', 0.14),
   };
 
-  return { startMusic, stopMusic, SFX, toggleMute, init, resume, TRACKS };
+  return { startMusic, stopMusic, SFX, toggleMute, init, resume, TRACKS, get muted() { return muted; } };
 })();

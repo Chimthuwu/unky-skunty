@@ -438,6 +438,8 @@ const Game = {
     /* vosk death dialogue already queued via events */
     if (this.pendingVoskDeath) {
       this.pendingVoskDeath = false;
+      /* the mask comes off for good once Scunter goes down */
+      CharArt.setImagePortrait('vosk', Assets.getImage('scunterGbGlitch'));
       const script = this.chapter.dialogue['vosk_death'];
       if (script) {
         Dialogue.start(script, () => { this.mode = 'idle'; this.deselect(); this.checkLoss(); });

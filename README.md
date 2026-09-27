@@ -1,9 +1,23 @@
-# PSYDECHAT EMBLEM — Version 0.1
+# PSYDECHAT EMBLEM — Version 0.1 ("Fever Dream" remix)
 
 An original turn-based tactical RPG prototype in the spirit of early-2000s
-handheld tactical RPGs. Zero dependencies, zero build step, zero external
-assets — all sprites, tiles, portraits, fonts, music and sound are generated
+handheld tactical RPGs. Zero dependencies, zero build step — the base engine
+(sprites, tiles, portraits, fonts, music, sound) is still all generated
 procedurally in code.
+
+On top of that, this branch adds an **optional, purely additive "fever dream"
+layer** (`js/gfx/assets.js` + `js/gfx/fever.js`) that mixes in a handful of
+found third-party 2D images/audio from an external asset library: chromatic
+glitch passes, random full-screen "intrusion" flashes of unrelated images,
+and one real-image "mask off" portrait swap for the final boss. If those
+asset files are missing, everything degrades silently back to the pure
+procedural game — see `js/assets/` for the exact files used and where they
+came from.
+
+The final boss, **Uncle Scunter**, is a loud, performatively edgy bigot whose
+whole schtick is a smokescreen — hypocrisy and self-loathing played for dark
+comedy, not the thing he's hiding. Full arc is in `js/data/chapter1.js`'s
+`vosk_intro` / `boss_range` / `vosk_death` dialogue.
 
 > **Chapter 1: "The Ashenreach Gate"** — A young commander and five companions
 > assault a frontier fortress held by the Ironmark faction. Defeat Warden Vosk.

@@ -71,14 +71,14 @@ const ChapterDB = {
       { id: 'e_priest1', team: 'enemy', classId: 'priest_enemy', name: 'Cantor', x: 27, y: 13, level: 2, inventory: ['heal_staff'], ai: 'healer' },
       /* boss on the throne */
       {
-        id: 'boss', team: 'enemy', classId: 'armor_enemy', name: 'Warden Vosk', x: 28, y: 11, level: 5,
+        id: 'boss', team: 'enemy', classId: 'armor_enemy', name: 'Uncle Scunter', x: 28, y: 11, level: 5,
         inventory: ['silver_lance', 'potion'],
         ai: 'boss',
         aggroWhen: 'zone',
         bossZone: { x1: 24, y1: 10, x2: 28, y2: 14 },
         bossKey: 'vosk',
-        portrait: 'vosk', sprite: 'armor', battle: 'armor',
-        bossQuote: 'The gate is closed. Your order is ash. Siege me if you dare.',
+        portrait: 'vosk', sprite: 'scunter', battle: 'armor',
+        bossQuote: 'The gate is closed, and so is that door behind me. Nobody goes near that door. SIEGE ME IF YOU DARE.',
       },
     ],
 
@@ -103,16 +103,23 @@ const ChapterDB = {
         { speaker: 'MIRA',  portrait: 'mira',  side: 'right', text: 'Then let’s finish this before nightfall, Commander.' },
       ],
       vosk_intro: [
-        { speaker: 'VOSK', portrait: 'vosk', side: 'right', text: 'So the Emberwatch crawls back. I salted your beacon-towers myself.' },
-        { speaker: 'ROWAN', portrait: 'rowan', side: 'left', text: 'And the families at Willowmere? The granaries?' },
-        { speaker: 'VOSK', portrait: 'vosk', side: 'right', text: 'Kindling. Now you’re here to be buried with the rest.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'So the Emberwatch crawls back. I salted your beacon-towers myself, you soft, tree-hugging — ' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: '— actually never mind, that one didn’t land. I’ve got a whole list of these prepared. Give me a second.' },
+        { speaker: 'ROWAN', portrait: 'rowan', side: 'left', text: 'We didn’t come here for your material, Scunter. We came for Willowmere.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'DON’T use my first name in front of my men! Now — kindling, all of it, and none of you are getting past this door!' },
+        { speaker: 'SELA', portrait: 'sela', side: 'left', text: 'Which door? There isn’t a door. You’re gesturing at a wall.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'THERE IS A DOOR AND IT IS LOCKED AND NONE OF YOU HEATHENS WILL EVER SEE WHAT’S BEHIND IT. Now DIE, in a very edgy and intimidating way!' },
       ],
       vosk_death: [
-        { speaker: 'VOSK', portrait: 'vosk', side: 'right', text: 'Impossible... a beacon relit... by children...' },
-        { speaker: 'ROWAN', portrait: 'rowan', side: 'left', text: 'The watch never went out, Vosk. We only banked it.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'No — no, get back, don’t touch the chest, I’ll tell you ANYTHING else —' },
+        { speaker: 'ROWAN', portrait: 'rowan', side: 'left', text: 'Nobody’s touching your chest, Scunter. We just want the gate.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: '...oh. Oh thank the Watch. I thought— never mind what I thought.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'Twenty years. Twenty years of slurs and salted towers and "kindling," and it was never about the war, was it. It was about making sure nobody looked at me too closely.' },
+        { speaker: 'ROWAN', portrait: 'rowan', side: 'left', text: 'You could have just... not done any of that.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'Don’t you dare say that like it’s simple. — Ashenreach take you all. Ashenreach take me most of all.' },
       ],
       boss_range: [
-        { speaker: 'VOSK', portrait: 'vosk', side: 'right', text: 'Steel and sorcery against my gate? Come, then. The Ashenreach buries heroes.' },
+        { speaker: 'UNCLE SCUNTER', portrait: 'vosk', side: 'right', text: 'Steel and sorcery against my gate? Come, then! The Ashenreach buries heroes and also, statistically, cowards, but let’s not dwell on that part.' },
       ],
       village_ashford: [
         { speaker: 'HERDER', portrait: null, side: 'right', text: 'Emberwatch! We hid a chest key from the raiders. You’ll be needing one, I wager.' },

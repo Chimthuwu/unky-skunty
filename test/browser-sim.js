@@ -85,6 +85,7 @@ const ORDER = [
   'js/game/engine.js',
   'js/gfx/font.js', 'js/gfx/charart.js', 'js/gfx/tiles.js', 'js/gfx/audio.js',
   'js/gfx/input.js', 'js/gfx/ui.js', 'js/gfx/dialogue.js', 'js/gfx/battlescene.js', 'js/gfx/levelup.js',
+  'js/gfx/assets.js', 'js/gfx/fever.js',
   'js/screens.js', 'js/debug.js', 'js/main.js',
 ];
 for (const f of ORDER) {

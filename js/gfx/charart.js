@@ -176,12 +176,27 @@ const CharArt = (() => {
     }
   }
 
+  const imageSprites = {}; /* kind -> [frame0Img, frame1Img], used by the fever remix */
+  function setImageSprite(kind, frames) { imageSprites[kind] = frames || null; }
+
   const cache = new Map();
   function unit(kind, frame, side) {
     const key = kind + '|' + frame + '|' + (side ? 1 : 0);
     if (cache.has(key)) return cache.get(key);
     const c = cv(16, 16);
     const g = c.getContext('2d');
+    if (imageSprites[kind]) {
+      const im = imageSprites[kind][frame % imageSprites[kind].length];
+      if (side) { g.translate(16, 0); g.scale(-1, 1); }
+      if (im) {
+        const scale = Math.min(16 / im.width, 16 / im.height);
+        const w = im.width * scale, h = im.height * scale;
+        g.imageSmoothingEnabled = false;
+        g.drawImage(im, (16 - w) / 2, 16 - h, w, h);
+      }
+      cache.set(key, c);
+      return c;
+    }
     if (side) { g.translate(16, 0); g.scale(-1, 1); }
     drawUnit(g, kind, frame, side);
     cache.set(key, c);
@@ -290,7 +305,25 @@ const CharArt = (() => {
     }
   }
 
+  const imagePortraits = {}; /* id -> HTMLImageElement, used by the fever remix */
+  function setImagePortrait(id, imgEl) { imagePortraits[id] = imgEl || null; }
+
   function portrait(id) {
+    if (imagePortraits[id]) {
+      const key = 'PIMG' + id;
+      if (cache.has(key)) return cache.get(key);
+      const c = cv(32, 32);
+      const g = c.getContext('2d');
+      g.fillStyle = '#0a0a0a';
+      g.fillRect(0, 0, 32, 32);
+      const im = imagePortraits[id];
+      const scale = Math.min(32 / im.width, 32 / im.height);
+      const w = im.width * scale, h = im.height * scale;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(im, (32 - w) / 2, (32 - h) / 2, w, h);
+      cache.set(key, c);
+      return c;
+    }
     const key = 'P' + id;
     if (cache.has(key)) return cache.get(key);
     const c = cv(32, 32);
@@ -299,5 +332,5 @@ const CharArt = (() => {
     return c;
   }
 
-  return { unit, portrait, KINDS };
+  return { unit, portrait, setImagePortrait, setImageSprite, KINDS };
 })();

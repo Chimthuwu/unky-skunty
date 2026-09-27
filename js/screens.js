@@ -62,6 +62,18 @@ const Screens = {
         g.fillStyle = '#e8c850';
         g.fillRect(SW - 58, SH - 66, 4, 4); /* lit window */
 
+        /* fever-dream bleed-through: the psychedelic gif ghosting behind everything */
+        const dream = Assets.getImage('feverdream');
+        if (dream) {
+          g.save();
+          g.globalAlpha = 0.22 + Math.sin(t / 400) * 0.08;
+          g.globalCompositeOperation = 'screen';
+          const scale = Math.max(SW / dream.width, SH / dream.height);
+          const dw = dream.width * scale, dh = dream.height * scale;
+          g.drawImage(dream, (SW - dw) / 2, (SH - dh) / 2 + Math.sin(t / 900) * 6, dw, dh);
+          g.restore();
+        }
+
         /* logo plate */
         UI.frame(g, 24, 14, SW - 48, 60);
         const title = 'PSYDECHAT';
@@ -71,7 +83,7 @@ const Screens = {
         Font.drawCentered(g, title, SW / 2, 21 + bob, '#fff4b0', 2);
         Font.drawCentered(g, title, SW / 2, 22 + bob, '#f8d050', 2);
         Font.drawCentered(g, sub, SW / 2, 42 + bob, '#e8e8d0', 2);
-        Font.drawCentered(g, 'A TACTICAL SAGA', SW / 2, 60, '#8898c8');
+        Font.drawCentered(g, 'A TACTICAL FEVER DREAM', SW / 2, 60, '#8898c8');
         /* emblem diamond accents */
         g.fillStyle = '#e8c850';
         g.fillRect(32, 40, 3, 3); g.fillRect(SW - 35, 40, 3, 3);
