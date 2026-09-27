@@ -209,10 +209,15 @@ console.log('\ntextured walls, no ceiling');
      prove the Fire Emblem tile art is actually reaching the raycaster
      rather than silently falling back to flat fill. */
   const g = makeCtxStub();
-  let slices = 0;
+  let slices = 0, floorTexels = 0;
   const origDraw = g.drawImage;
   g.drawImage = function () {
-    if (arguments.length >= 9) slices++;
+    /* both passes use the 9-arg source-rect form; they differ in the
+       source rect — walls slice a full-height column (1 x texH), the
+       ground stretches a single 1x1 texel across a run */
+    if (arguments.length >= 9) {
+      if (arguments[3] === 1 && arguments[4] === 1) floorTexels++; else slices++;
+    }
     return origDraw.apply(this, arguments);
   };
   vm.runInContext('__ctx = __CTX2;', Object.assign(sandbox, { __CTX2: g }));
@@ -225,6 +230,8 @@ console.log('\ntextured walls, no ceiling');
     slices + ' textured slices over 10 frames');
   check('walls run to the top of the screen (no roof)', true,
     'sky replaces the old ceiling; wall base still below the horizon');
+  check('ground is cast with Ashenreach grass/water tiles', floorTexels > 100,
+    floorTexels + ' floor texels over 10 frames');
 }
 
 console.log('\nmusic layering');

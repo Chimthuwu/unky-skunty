@@ -98,6 +98,16 @@ first-person horror chase mode ("Escape the Uncle") — see README.md.
   isn't resolvable at 240x160. Now ~745.
 - `wall_texture.png` (the PSX dungeon photo) is now only used on the main
   menu as a decorative background tile, not in the raycaster.
+- **The ground is cast too**, using the Ashenreach terrain tiles: green
+  `plain` as the default with `water` broken through it. This is a real
+  floor-casting pass — for each screen row below the horizon the floor
+  distance is fixed, so it steps through cells in runs and draws each run
+  as one `drawImage` of a single texel, rather than a per-pixel loop.
+  Combined cost is ~745 wall slices + ~356 floor texels a frame.
+  Note the interior grid never had a water cell (the river belonged to the
+  outdoor map that wasn't ported), so **where** the water sits is a stable
+  hash of the cell, not authored — if a specific flooded area reads better
+  than scattered pools, that needs hand-placing.
 
 ### Open balance questions
 - Uncle only closes when he has LOS, and a bullet only travels 8.1 cells

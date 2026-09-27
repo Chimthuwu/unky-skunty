@@ -357,6 +357,23 @@ const EscapeMode = (() => {
       wallTiles.push(row);
     }
 
+    /* The ground is the Ashenreach terrain: green plain as the default,
+       with standing water broken through it. This interior grid never had
+       a water cell — the river belonged to the outdoor map that wasn't
+       ported — so where the water sits is chosen by a stable hash rather
+       than authored. Both tiles are the tactics game's own. */
+    const FLOOR_TILE_IDS = ['plain', 'plain', 'plain', 'plain', 'plain', 'plain', 'plain', 'water'];
+    const floorTiles = [];
+    for (let y = 0; y < H; y++) {
+      const row = [];
+      for (let x = 0; x < W; x++) {
+        if (grid[y][x] === 1 || typeof TileArt === 'undefined') { row.push(null); continue; }
+        const h = ((x * 2654435761) ^ (y * 40503)) >>> 0;
+        row.push(TileArt.tile(FLOOR_TILE_IDS[h % FLOOR_TILE_IDS.length], 0));
+      }
+      floorTiles.push(row);
+    }
+
     let px, py, pa;
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
@@ -752,14 +769,61 @@ const EscapeMode = (() => {
       sky.addColorStop(0, '#120c18');
       sky.addColorStop(1, '#3a2028');
       g.fillStyle = sky; g.fillRect(0, 0, SW, horizon);
-      g.fillStyle = '#141018'; g.fillRect(0, horizon, SW, SH - horizon);
+
+      /* Per-column ray directions, needed by both the wall and the floor
+         pass. Computed once up front rather than twice. */
+      const rayDirX = new Float64Array(SW), rayDirY = new Float64Array(SW);
+      for (let col = 0; col < SW; col++) {
+        const rayA = pa + ((2 * col / SW) - 1) * (FOV / 2);
+        rayDirX[col] = Math.cos(rayA);
+        rayDirY[col] = Math.sin(rayA);
+      }
+
+      /* ---- ground ----
+         Proper floor casting: for each screen row below the horizon the
+         distance to the floor is fixed, so walking across that row you
+         step through floor cells in runs. Each run is one drawImage of a
+         single texel stretched to the run's width, which keeps this to a
+         few hundred calls instead of one per pixel. */
+      for (let y = horizon + 1; y < SH; y++) {
+        const rowDist = (0.5 * SH) / (y - horizon);
+        let runStart = 0, runCell = -1, runTile = null, runTX = 0, runTY = 0;
+        for (let col = 0; col <= SW; col++) {
+          let cell = -1, tile = null, tX = 0, tY = 0;
+          if (col < SW) {
+            const fx = px + rowDist * rayDirX[col];
+            const fy = py + rowDist * rayDirY[col];
+            const cx = Math.floor(fx), cy = Math.floor(fy);
+            if (cx >= 0 && cy >= 0 && cx < W && cy < H) {
+              tile = floorTiles[cy][cx];
+              if (tile) {
+                cell = cy * W + cx;
+                tX = Math.min(tile.width - 1, ((fx - cx) * tile.width) | 0);
+                tY = Math.min(tile.height - 1, ((fy - cy) * tile.height) | 0);
+              }
+            }
+          }
+          if (cell !== runCell) {
+            if (runTile) {
+              g.drawImage(runTile, runTX, runTY, 1, 1, runStart, y, col - runStart, 1);
+            }
+            runStart = col; runCell = cell; runTile = tile; runTX = tX; runTY = tY;
+          }
+        }
+        /* same falloff as the walls, so the ground recedes with them */
+        const fshade = Math.max(0.12, 1 - rowDist / 9);
+        if (fshade < 0.99) {
+          g.fillStyle = `rgba(10,6,14,${(1 - fshade).toFixed(3)})`;
+          g.fillRect(0, y, SW, 1);
+        }
+      }
 
       const zbuf = new Float32Array(SW);
       const MAX_SLICES = 4;
       for (let col = 0; col < SW; col++) {
         const camX = (2 * col / SW) - 1;
         const rayA = pa + camX * (FOV / 2);
-        const rdx = Math.cos(rayA), rdy = Math.sin(rayA);
+        const rdx = rayDirX[col], rdy = rayDirY[col];
         let mx = Math.floor(px), my = Math.floor(py);
         const deltaX = Math.abs(1 / (rdx || 1e-9)), deltaY = Math.abs(1 / (rdy || 1e-9));
         let stepX, sideX, stepY, sideY;
