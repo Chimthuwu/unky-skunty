@@ -54,6 +54,19 @@ const EscapeMode = (() => {
     return true;
   }
 
+  /* ---------------- procedural bullet billboard ---------------- */
+  let bulletCanvas = null;
+  function bulletSprite() {
+    if (bulletCanvas) return bulletCanvas;
+    const c = document.createElement('canvas');
+    c.width = 8; c.height = 8;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff4b0'; g.fillRect(2, 2, 4, 4);
+    g.fillStyle = '#ffd050'; g.fillRect(1, 1, 6, 1); g.fillRect(1, 6, 6, 1);
+    bulletCanvas = c;
+    return c;
+  }
+
   /* ---------------- procedural bunny billboard ---------------- */
   let bunnyCanvas = null;
   function bunnySprite() {
@@ -73,6 +86,16 @@ const EscapeMode = (() => {
     return c;
   }
 
+  const TAUNTS = [
+    "Wot im talking about ye is England for the English innit.",
+    "I have an air rifle for when this country goes to shit!",
+    "Back in MY day the bunnies knew their place.",
+    "Nothing personal, I'm just VERY edgy.",
+    "Don't look at the door! I said don't look at it!",
+    "You lot are why we can't have nice things.",
+    "I'm not angry, I'm just... culturally passionate.",
+  ];
+
   /* ---------------- factory ---------------- */
   function make() {
     const grid = buildMap();
@@ -80,34 +103,57 @@ const EscapeMode = (() => {
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
     const catchRadius = 0.55;
-    const exitPos = { x: 21.5, y: 13.5 };
+
+    /* every open floor cell, used to scatter bunnies each stage */
+    const floorCells = [];
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) if (!grid[y][x]) floorCells.push({ x: x + 0.5, y: y + 0.5 });
 
     let uncle;
     const UNCLE_SPD = 2.15;
 
     let bunnies;
+    let stage = 1;
+    let stageBanner = 0;
+
+    function spawnBunnies(count) {
+      const pool = floorCells.filter(c => Math.hypot(c.x - px, c.y - py) > 3);
+      const picked = [];
+      for (let i = 0; i < count && pool.length; i++) {
+        const idx = (Math.random() * pool.length) | 0;
+        picked.push(pool.splice(idx, 1)[0]);
+      }
+      return picked.map(c => ({ x: c.x, y: c.y, dead: false, wobble: Math.random() * 10 }));
+    }
 
     function resetRun() {
       px = 2.5; py = 2.5; pa = 0.4;
+      stage = 1;
       uncle = { x: 12.5, y: 8.5, alert: 0, lastSeenX: 12.5, lastSeenY: 8.5 };
-      bunnies = [
-        { x: 7.5, y: 3.5, dead: false, wobble: Math.random() * 10 },
-        { x: 18.5, y: 4.5, dead: false, wobble: Math.random() * 10 },
-        { x: 3.5, y: 11.5, dead: false, wobble: Math.random() * 10 },
-        { x: 13.5, y: 13.5, dead: false, wobble: Math.random() * 10 },
-        { x: 20.5, y: 10.5, dead: false, wobble: Math.random() * 10 },
-        { x: 9.5, y: 6.5, dead: false, wobble: Math.random() * 10 },
-      ];
+      bunnies = spawnBunnies(5 + stage);
       bunniesSlain = 0;
       shotFlash = 0;
+      projectiles = [];
+      stageBanner = 1400;
+      nextTaunt = 4000 + Math.random() * 3000;
     }
 
-    let state = 'menu';   /* menu | playing | caught | escaped */
+    function nextStage() {
+      stage++;
+      bunnies = spawnBunnies(Math.min(14, 5 + stage));
+      stageBanner = 1400;
+      UNCLE_SPD_MULT = 1 + (stage - 1) * 0.08;
+    }
+
+    let state = 'menu';   /* menu | playing | caught */
     let t = 0;
     let shotFlash = 0;
     let bunniesSlain = 0;
     let caughtT = 0;
     let camPlane; /* recomputed each frame from pa */
+    let projectiles = [];
+    let nextTaunt = 5000;
+    let tauntText = '', tauntT = 0;
+    let UNCLE_SPD_MULT = 1;
     resetRun();
 
     /* fixed-looking but slightly-off ear positions poking in from the
@@ -144,7 +190,7 @@ const EscapeMode = (() => {
       const ty = uncle.alert > 0 ? uncle.lastSeenY : uncle.lastSeenY + Math.cos(t / 900) * 2;
       const dx = tx - uncle.x, dy = ty - uncle.y;
       const d = Math.hypot(dx, dy);
-      const spd = (uncle.alert > 0 ? UNCLE_SPD : UNCLE_SPD * 0.45) * dtS;
+      const spd = (uncle.alert > 0 ? UNCLE_SPD * UNCLE_SPD_MULT : UNCLE_SPD * UNCLE_SPD_MULT * 0.45) * dtS;
       if (d > 0.15) {
         const stepx = dx / d * spd, stepy = dy / d * spd;
         const r = 0.2;
@@ -166,22 +212,36 @@ const EscapeMode = (() => {
       }
     }
 
+    const PROJ_SPD = 9, PROJ_LIFE = 900, PROJ_HIT_R = 0.32;
+
     function shoot() {
       if (shotFlash > 0) return;
       shotFlash = 120;
       Audio.SFX.confirm();
-      /* hitscan: nearest bunny within a narrow cone & short range */
-      let best = null, bestD = 6.5;
-      for (const b of bunnies) {
-        if (b.dead) continue;
-        const dx = b.x - px, dy = b.y - py;
-        const dist = Math.hypot(dx, dy);
-        if (dist > bestD) continue;
-        const ang = Math.atan2(dy, dx) - pa;
-        const wrapped = Math.atan2(Math.sin(ang), Math.cos(ang));
-        if (Math.abs(wrapped) < 0.16 && hasLOS(grid, px, py, b.x, b.y)) { best = b; bestD = dist; }
+      projectiles.push({
+        x: px + Math.cos(pa) * 0.3, y: py + Math.sin(pa) * 0.3,
+        dx: Math.cos(pa), dy: Math.sin(pa), life: PROJ_LIFE,
+      });
+    }
+
+    function updateProjectiles(dt) {
+      const dtS = dt / 1000;
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.life -= dt;
+        const nx = p.x + p.dx * PROJ_SPD * dtS, ny = p.y + p.dy * PROJ_SPD * dtS;
+        if (p.life <= 0 || isWall(grid, nx, ny)) { projectiles.splice(i, 1); continue; }
+        p.x = nx; p.y = ny;
+        for (const b of bunnies) {
+          if (b.dead) continue;
+          if (Math.hypot(b.x - p.x, b.y - p.y) < PROJ_HIT_R) {
+            b.dead = true; bunniesSlain++;
+            Assets.playSound('doorOpen', 0.3);
+            projectiles.splice(i, 1);
+            break;
+          }
+        }
       }
-      if (best) { best.dead = true; bunniesSlain++; Assets.playSound('doorOpen', 0.3); }
     }
 
     function update(dt) {
@@ -193,11 +253,14 @@ const EscapeMode = (() => {
         if (Input.pressed('confirm') || Input.pressed('cancel')) { resetRun(); state = 'playing'; }
         return;
       }
-      if (state === 'caught' || state === 'escaped') {
+      if (state === 'caught') {
         caughtT += dt;
         if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
         return;
       }
+
+      if (stageBanner > 0) stageBanner = Math.max(0, stageBanner - dt);
+      if (tauntT > 0) tauntT = Math.max(0, tauntT - dt);
 
       const dtS = Math.min(50, dt) / 1000;
       if (Input.down('left')) pa -= TURN_SPD * dtS;
@@ -208,13 +271,23 @@ const EscapeMode = (() => {
 
       updateUncle(dt);
       updateBunnies(dt);
+      updateProjectiles(dt);
+
+      nextTaunt -= dt;
+      if (nextTaunt <= 0) {
+        tauntText = TAUNTS[(Math.random() * TAUNTS.length) | 0];
+        tauntT = 3200;
+        nextTaunt = 7000 + Math.random() * 6000;
+      }
 
       if (Math.hypot(uncle.x - px, uncle.y - py) < catchRadius) {
         state = 'caught'; caughtT = 0;
         Assets.playSound('openFence', 0.5);
       }
-      if (Math.hypot(exitPos.x - px, exitPos.y - py) < 0.7) {
-        state = 'escaped'; caughtT = 0;
+      if (bunnies.length && bunnies.every(b => b.dead)) {
+        nextStage();
+        tauntText = TAUNTS[(Math.random() * TAUNTS.length) | 0];
+        tauntT = 3200;
       }
     }
 
@@ -261,6 +334,7 @@ const EscapeMode = (() => {
       for (const b of bunnies) if (!b.dead) sprites.push({ x: b.x, y: b.y, img: bunnySprite(), scale: 0.8 });
       const uImg = (Math.floor(t / 300) % 2 === 0) ? Assets.getImage('scunterMapIdle') : Assets.getImage('scunterMapWalk');
       sprites.push({ x: uncle.x, y: uncle.y, img: uImg, scale: 1.35, uncle: true });
+      for (const p of projectiles) sprites.push({ x: p.x, y: p.y, img: bulletSprite(), scale: 0.16, glow: true });
       sprites.sort((a, b2) => Math.hypot(b2.x - px, b2.y - py) - Math.hypot(a.x - px, a.y - py));
 
       for (const s of sprites) {
@@ -278,6 +352,7 @@ const EscapeMode = (() => {
         if (ty > zbuf[sampleCol] + 0.15) continue; /* behind a wall */
         g.save();
         g.globalAlpha = Math.max(0.25, 1 - ty / 9);
+        if (s.glow) g.globalCompositeOperation = 'lighter';
         g.imageSmoothingEnabled = false;
         g.drawImage(s.img, drawStartX, drawStartY, spriteW, spriteH);
         g.restore();
@@ -367,7 +442,26 @@ const EscapeMode = (() => {
       g.fillStyle = 'rgba(10,8,16,0.55)';
       g.fillRect(0, SH - 12, SW, 12);
       Font.draw(g, 'BUNNIES: ' + bunniesSlain, 4, SH - 9, '#e8b0c8');
+      Font.draw(g, 'STAGE ' + stage, SW / 2 - 18, SH - 9, '#8898c8');
       Font.draw(g, uncle.alert > 0 ? 'HE SEES YOU' : 'quiet...', SW - 90, SH - 9, uncle.alert > 0 ? '#f86060' : '#607080');
+
+      /* Uncle's taunts, subtitled like he's right behind you (he might be) */
+      if (tauntT > 0 && tauntText) {
+        const a = Math.min(1, tauntT / 400);
+        g.save();
+        g.globalAlpha = a;
+        g.fillStyle = 'rgba(10,4,8,0.7)';
+        g.fillRect(0, 0, SW, 18);
+        Font.drawCentered(g, '"' + tauntText.slice(0, 46) + '"', SW / 2, 5, '#f8c0d0');
+        g.restore();
+      }
+      if (stageBanner > 0) {
+        const a = Math.min(1, stageBanner / 300);
+        g.save();
+        g.globalAlpha = a;
+        Font.drawCentered(g, 'STAGE ' + stage, SW / 2, SH / 2 - 4, '#e8c850', 2);
+        g.restore();
+      }
 
       if (state === 'caught') {
         g.fillStyle = 'rgba(30,0,4,0.55)'; g.fillRect(0, 0, SW, SH);
@@ -378,11 +472,7 @@ const EscapeMode = (() => {
           g.drawImage(img, (SW - img.width * s) / 2, (SH - img.height * s) / 2, img.width * s, img.height * s);
         }
         Font.drawCentered(g, 'HE GOT YOU', SW / 2, 12, '#f86060', 2);
-        if (caughtT > 400) Font.drawCentered(g, 'Z / X TO RETURN TO TITLE', SW / 2, SH - 12, '#e8c850');
-      } else if (state === 'escaped') {
-        g.fillStyle = 'rgba(6,20,10,0.5)'; g.fillRect(0, 0, SW, SH);
-        Font.drawCentered(g, 'YOU MADE IT OUT', SW / 2, SH / 2 - 10, '#a0e8b0', 2);
-        Font.drawCentered(g, 'bunnies dealt with: ' + bunniesSlain, SW / 2, SH / 2 + 10, '#c8d8c8');
+        Font.drawCentered(g, 'reached stage ' + stage, SW / 2, SH / 2 + 40, '#c8b0b8');
         if (caughtT > 400) Font.drawCentered(g, 'Z / X TO RETURN TO TITLE', SW / 2, SH - 12, '#e8c850');
       }
     }
