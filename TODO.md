@@ -82,6 +82,22 @@ first-person horror chase mode ("Escape the Uncle") — see README.md.
   engine and failed on missing files.
 - `EscapeMode.make()` now returns a `_debug()` snapshot used only by the
   harness. Nothing in the game reads it.
+- **Walls are texture-mapped and the roof is gone.** The raycaster used to
+  fill each column with a flat shaded rect under a flat ceiling. It now
+  slices a 16x16 terrain tile per column and tiles it down the face, using
+  the *original tactics game's own tile art* — `js/gfx/tiles.js` was
+  restored from git (`cf0e571^`) and is back in `index.html`. The tiles are
+  generated procedurally, so nothing new is downloaded and the old art
+  style returns exactly as it was. Which tile a wall gets comes from a
+  stable hash of its cell (mostly `wall`, with `ruined`/`rubble`/`pillar`
+  mixed in) since the interior grid stores a single solid value per cell.
+  The ceiling fill is replaced by a sky gradient; walls run to y=0 while
+  their base stays below the horizon, so the floor is still visible.
+  Vertical tiling is capped at 4 slices per column — uncapped, a distant
+  wall wanted ~6, which is 1100+ `drawImage` calls a frame for detail that
+  isn't resolvable at 240x160. Now ~745.
+- `wall_texture.png` (the PSX dungeon photo) is now only used on the main
+  menu as a decorative background tile, not in the raycaster.
 
 ### Open balance questions
 - Uncle only closes when he has LOS, and a bullet only travels 8.1 cells

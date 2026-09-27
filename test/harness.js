@@ -95,8 +95,8 @@ function buildSandbox() {
 
 const ORDER = [
   'js/core/utils.js', 'js/core/config.js', 'js/gfx/font.js', 'js/gfx/charart.js',
-  'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js', 'js/gfx/fever.js',
-  'js/fps/escape.js',
+  'js/gfx/tiles.js', 'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js',
+  'js/gfx/fever.js', 'js/fps/escape.js',
 ];
 
 function load(sandbox) {

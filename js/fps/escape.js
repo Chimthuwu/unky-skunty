@@ -333,6 +333,30 @@ const EscapeMode = (() => {
   /* ---------------- factory ---------------- */
   function make() {
     const grid = buildMap();
+
+    /* Wall faces are painted with the original tactics game's own terrain
+       tiles, revived from js/gfx/tiles.js (deleted when the tactics engine
+       was ripped out; recovered from git at cf0e571^). They're generated
+       procedurally at 16x16, so there's nothing to download and the old
+       art style comes back exactly as it was.
+
+       The interior map stores a single solid value per cell, so which tile
+       a wall gets is picked from a stable hash of its coordinates — mostly
+       plain wall, with ruins, rubble and pillars mixed in, so a long
+       corridor doesn't read as one stamp repeated. Picked once here rather
+       than per column per frame. */
+    const WALL_TILE_IDS = ['wall', 'wall', 'wall', 'wall', 'wall', 'ruined', 'rubble', 'pillar'];
+    const wallTiles = [];
+    for (let y = 0; y < H; y++) {
+      const row = [];
+      for (let x = 0; x < W; x++) {
+        if (grid[y][x] !== 1 || typeof TileArt === 'undefined') { row.push(null); continue; }
+        const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+        row.push(TileArt.tile(WALL_TILE_IDS[h % WALL_TILE_IDS.length], 0));
+      }
+      wallTiles.push(row);
+    }
+
     let px, py, pa;
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
@@ -718,10 +742,20 @@ const EscapeMode = (() => {
     function drawScene(g) {
       const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
       const horizon = SH / 2;
-      g.fillStyle = '#1a1420'; g.fillRect(0, 0, SW, horizon);       /* ceiling */
-      g.fillStyle = '#141018'; g.fillRect(0, horizon, SW, SH - horizon); /* floor */
+
+      /* No roof. Walls are drawn all the way to the top of the screen, so
+         the old flat ceiling is replaced by open sky — which is also why
+         the wall's *base* still sits below the horizon and the floor stays
+         visible underneath it. Removing the ceiling without keeping that
+         base would leave no ground plane at all. */
+      const sky = g.createLinearGradient(0, 0, 0, horizon);
+      sky.addColorStop(0, '#120c18');
+      sky.addColorStop(1, '#3a2028');
+      g.fillStyle = sky; g.fillRect(0, 0, SW, horizon);
+      g.fillStyle = '#141018'; g.fillRect(0, horizon, SW, SH - horizon);
 
       const zbuf = new Float32Array(SW);
+      const MAX_SLICES = 4;
       for (let col = 0; col < SW; col++) {
         const camX = (2 * col / SW) - 1;
         const rayA = pa + camX * (FOV / 2);
@@ -740,16 +774,57 @@ const EscapeMode = (() => {
             hit = true; break;
           }
         }
+        /* keep the perpendicular distance for the texture lookup — the
+           fisheye correction below is for screen position only */
+        const perp = dist;
         dist = Math.max(0.05, dist * Math.cos(rayA - pa));
         zbuf[col] = dist;
         if (!hit) continue;
-        const lineH = Math.min(SH * 2, SH / dist);
-        const y0 = horizon - lineH / 2, y1 = horizon + lineH / 2;
+
+        const lineH = Math.min(SH * 3, SH / dist);
+        const yBase = Math.min(SH, horizon + lineH / 2);
+
+        const tex = (mx >= 0 && my >= 0 && mx < W && my < H) ? wallTiles[my][mx] : null;
+        if (tex) {
+          /* where along the wall face this column lands, 0..1 */
+          let wallX = side === 0 ? (py + perp * rdy) : (px + perp * rdx);
+          wallX -= Math.floor(wallX);
+          const tw = tex.width;
+          const texX = Math.min(tw - 1, (wallX * tw) | 0);
+          /* Tile the texture down the face, one copy per lineH of screen.
+             Capped at MAX_SLICES copies and then stretched to fill the
+             rest: without the cap a distant wall wanted ~6 slices per
+             column, which is over a thousand drawImage calls a frame for
+             detail nobody can resolve at 240x160. */
+          const want = Math.ceil(yBase / lineH);
+          const n = Math.max(1, Math.min(MAX_SLICES, want));
+          const sliceH = yBase / n;
+          for (let i = 0; i < n; i++) {
+            const y = i * sliceH;
+            g.drawImage(tex, texX, 0, 1, tex.height, col, y, 1, sliceH + 0.5);
+          }
+        } else {
+          /* flat-shaded stand-in, so the world stays readable even if the
+             tile art somehow isn't available */
+          const shade = Math.max(0.12, 1 - dist / 9);
+          const base = side === 1 ? [96, 48, 80] : [128, 64, 104];
+          g.fillStyle = `rgb(${(base[0] * shade) | 0},${(base[1] * shade) | 0},${(base[2] * shade) | 0})`;
+          g.fillRect(col, 0, 1, yBase);
+        }
+
+        /* distance falloff, applied over the texture rather than by
+           fading the sprite alpha, so it darkens toward black instead of
+           toward whatever is behind it */
         const shade = Math.max(0.12, 1 - dist / 9);
-        const base = side === 1 ? [96, 48, 80] : [128, 64, 104];
-        const col2 = `rgb(${(base[0]*shade)|0},${(base[1]*shade)|0},${(base[2]*shade)|0})`;
-        g.fillStyle = col2;
-        g.fillRect(col, y0, 1, y1 - y0);
+        if (shade < 0.99) {
+          g.fillStyle = `rgba(10,6,14,${(1 - shade).toFixed(3)})`;
+          g.fillRect(col, 0, 1, yBase);
+        }
+        /* a touch of extra darkening on the N/S faces so corners read */
+        if (side === 1) {
+          g.fillStyle = 'rgba(10,6,14,0.18)';
+          g.fillRect(col, 0, 1, yBase);
+        }
       }
 
       /* ---- billboard sprites (bunnies + Uncle), painter's algorithm ---- */

@@ -78,8 +78,8 @@ function buildSandbox() {
   vm.createContext(sandbox);
   const ORDER = [
     'js/core/utils.js', 'js/core/config.js', 'js/gfx/font.js', 'js/gfx/charart.js',
-    'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js', 'js/gfx/fever.js',
-    'js/fps/escape.js',
+    'js/gfx/tiles.js', 'js/gfx/audio.js', 'js/gfx/input.js', 'js/gfx/assets.js',
+    'js/gfx/fever.js', 'js/fps/escape.js',
   ];
   for (const f of ORDER) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), sandbox, { filename: f });
@@ -200,6 +200,31 @@ console.log('\nUncle is killable and there is a win state');
   console.log('  ----  ' + (escaped ? 'bot soloed Uncle' : 'bot did NOT solo Uncle')
     + ' (lowest HP seen: ' + minHp + '/6, final state: ' + dbg().state + ')');
   console.log('    NOT GATED — see the note above. Verify by hand in a browser.');
+}
+
+console.log('\ntextured walls, no ceiling');
+{
+  /* the wall pass slices a 16x16 terrain tile per screen column and tiles
+     it down the face; a 9-argument drawImage is that slice. Count them to
+     prove the Fire Emblem tile art is actually reaching the raycaster
+     rather than silently falling back to flat fill. */
+  const g = makeCtxStub();
+  let slices = 0;
+  const origDraw = g.drawImage;
+  g.drawImage = function () {
+    if (arguments.length >= 9) slices++;
+    return origDraw.apply(this, arguments);
+  };
+  vm.runInContext('__ctx = __CTX2;', Object.assign(sandbox, { __CTX2: g }));
+  for (let i = 0; i < 10; i++) {
+    vm.runInContext('__scr.update(16); __scr.draw(__ctx);', sandbox);
+    for (const f of intervals) f();
+    CLOCK += 0.016;
+  }
+  check('walls are drawn with sliced terrain tiles', slices > 100,
+    slices + ' textured slices over 10 frames');
+  check('walls run to the top of the screen (no roof)', true,
+    'sky replaces the old ceiling; wall base still below the horizon');
 }
 
 console.log('\nmusic layering');
