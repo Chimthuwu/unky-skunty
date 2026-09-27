@@ -443,11 +443,35 @@ const EscapeMode = (() => {
     /* Set up a round. Everything that makes round two different —
        his size, the taunts, the way the horde moves, the song — hangs
        off this one function. */
+    /* One rotation in four runs with the whole palette turned inside out.
+       It's a held state for the length of the round, not a per-frame
+       toggle, so it can never strobe the way a flickering filter would.
+       `invertColor` is the fill the frame gets differenced against — the
+       full spectrum is a straight invert, a narrower slice lands as a
+       one-channel or two-channel inversion, which is the stranger read. */
+    const INVERT_CHANCE = 0.4;
+    let invertColor = null;
+
+    function rollInvert() {
+      invertColor = null;
+      if (Math.random() >= INVERT_CHANCE) return;
+      /* white differences every channel; dropping channels at random
+         leaves only the chosen ones flipped */
+      const keep = 0xff;
+      const r = Math.random() < 0.6 ? keep : 0;
+      const g = Math.random() < 0.6 ? keep : 0;
+      const b = Math.random() < 0.6 ? keep : 0;
+      /* all three dropped would be a no-op, so keep at least one */
+      if (!(r || g || b)) invertColor = 'rgb(255,255,255)';
+      else invertColor = `rgb(${r},${g},${b})`;
+    }
+
     function beginRound(n) {
       round = n;
       mirrored = n === 2;
       uncleScale = mirrored ? 1.9 : 1;
       aftermath = null;
+      rollInvert();
       Audio.setPlayback(mirrored ? { reverse: true, rate: 0.62 } : null);
       resetRun();
     }
@@ -531,6 +555,10 @@ const EscapeMode = (() => {
        the size. Dying in round two drops you back into round one
        rather than ending the run. */
     let round = 1;
+    /* How many times the trip has ended. The first death sends you back
+       to round one; after that the rounds alternate, so the second death
+       drops you into round two and the third back into round one again. */
+    let deaths = 0;
     let mirrored = false;
     let aftermath = null;
 
@@ -826,7 +854,8 @@ const EscapeMode = (() => {
       }
       if (state === 'caught') {
         caughtT += dt;
-        if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
+        /* no way out of this one but the cutscene — dying never returns
+           you to the title, it restarts the trip */
         /* the death card holds for a beat, then the screen comes apart */
         if (caughtT > 1400 && !aftermath) {
           aftermath = Aftermath.create(Config.SCREEN_W, Config.SCREEN_H);
@@ -842,9 +871,11 @@ const EscapeMode = (() => {
           while (!aftermath.done) aftermath.update(200, { down: () => false, pressed: () => false });
         }
         if (aftermath.done) {
-          /* round two falls back to round one, and round one back to
-             round two — dying is a corridor, not an ending */
-          beginRound(round === 1 ? 2 : 1);
+          /* the trip restarts from round one the first time, then
+             alternates — death two drops you into the mirrored round,
+             death three back into the first, and so on */
+          deaths++;
+          beginRound(deaths === 1 ? 1 : (deaths % 2 === 0 ? 2 : 1));
           state = 'playing';
         }
         return;
@@ -1209,6 +1240,20 @@ const EscapeMode = (() => {
       }
 
       g.filter = 'none';   /* don't leak the drain into the next frame */
+
+      /* A rotation that rolled inverted gets the whole frame differenced
+         at the end, once everything is already on the canvas. It has to
+         go here rather than on a context filter: the world pass is a
+         putImageData of an already-composited pixel buffer, which
+         filters do not touch, so setting it earlier would have skipped
+         the sky, the ground and every wall. */
+      if (invertColor) {
+        g.save();
+        g.globalCompositeOperation = 'difference';
+        g.fillStyle = invertColor;
+        g.fillRect(0, 0, SW, SH);
+        g.restore();
+      }
     }
 
     let camPlaneX = 0, camPlaneY = 0;
@@ -1218,6 +1263,7 @@ const EscapeMode = (() => {
     function debugState() {
       return {
         px, py, pa, state, stage, playerHP, uncleDead, escapedT,
+        invert: invertColor,
         round, mirrored, uncleScale,
         uncle: {
           x: uncle.x, y: uncle.y, cx: uncle.cx, cy: uncle.cy, hp: uncle.hp,
@@ -1236,6 +1282,9 @@ const EscapeMode = (() => {
          taunt pool is live; both are read-only views, same as _debug */
       _phase: () => (aftermath ? aftermath.phase : ''),
       _taunts: () => tauntPool(),
+      /* the harness re-rolls the rotation palette a known number of times
+         to check the 40% rate without 400 real rounds */
+      _rollInvert: rollInvert,
     };
   }
 

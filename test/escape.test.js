@@ -198,7 +198,66 @@ console.log('\nthe death sequence runs and hands back a live run');
   const after = dbg();
   check('it respawned the player into a live run', after.state === 'playing',
     'state=' + after.state + ' HP ' + after.playerHP);
-  check('the respawn is round two', after.round === 2, 'round ' + after.round);
+  /* the trip restarts from round one the first time — round two is
+     something you get through, not something you respawn into */
+  check('the first death restarts at round one', after.round === 1, 'round ' + after.round);
+}
+
+console.log('\ndeath never returns to the title, and later deaths alternate');
+{
+  const d = dbg();
+  check('the run resumes in play, not the menu', d.state === 'playing',
+    'state=' + d.state);
+
+  /* die again: the second death should drop into round two */
+  setInput('() => false', '() => false');
+  for (let i = 0; i < 4000; i++) {
+    const s = dbg().state;
+    if (s === 'caught' || s === 'aftermath') break;
+    frame();
+  }
+  check('the run ends again', ['caught', 'aftermath'].includes(dbg().state), 'state=' + dbg().state);
+  /* no input at all: the death must still resolve rather than wait on
+     a keypress that returns you to the title */
+  for (let i = 0; i < 6000; i++) {
+    const s = dbg().state;
+    if (s === 'playing') break;
+    frame();
+  }
+  const d2 = dbg();
+  check('the second death lands in round two', d2.round === 2 && d2.state === 'playing',
+    'state=' + d2.state + ' round ' + d2.round);
+}
+
+console.log('\nrotations sometimes run inverted');
+{
+  /* re-roll a few thousand times rather than playing 400 rounds */
+  const N = 4000;
+  let hits = 0;
+  const seen = new Set();
+  for (let i = 0; i < N; i++) {
+    vm.runInContext('__scr._rollInvert()', sandbox);
+    const c = dbg().invert;
+    if (c) { hits++; seen.add(c); }
+  }
+  const rate = hits / N;
+  check('roughly 40% of rotations roll inverted', rate > 0.35 && rate < 0.45,
+    (rate * 100).toFixed(1) + '% over ' + N + ' rolls');
+  check('an inverted rotation names a real colour', seen.size > 0,
+    Array.from(seen).slice(0, 3).join(' '));
+  /* the fill has to be a colour the frame can actually be differenced
+     against, or the composite is a silent no-op */
+  check('the invert fill is a full-brightness channel mask',
+    Array.from(seen).every(c => /^rgb\((\d+),(\d+),(\d+)\)$/.test(c)),
+    Array.from(seen).join(' '));
+
+  /* and it is held, not flickering: the value is stable across frames */
+  setInput('() => false', '() => false');
+  vm.runInContext('__scr._rollInvert()', sandbox);
+  const a = dbg().invert;
+  for (let i = 0; i < 60; i++) frame();
+  check('the palette holds for the length of the round', dbg().invert === a,
+    String(a));
 }
 
 console.log('\nround two mirrors the player instead of hunting');
@@ -247,6 +306,8 @@ console.log('\nUncle is killable and there is a win state');
   /* back to a live run. If the previous section left us inside the death
      sequence, cancel skips it — and since round two falls back to round
      one, that also puts us back on the board this section is testing. */
+  /* (cancel still skips the cutscene itself; it no longer returns you
+     to the title, it only fast-forwards to the restart) */
   setInput('() => false', '() => false');
   for (let i = 0; i < 400 && dbg().state === 'aftermath'; i++) { press('cancel'); frame(); }
   for (let i = 0; i < 200 && dbg().state !== 'playing'; i++) {

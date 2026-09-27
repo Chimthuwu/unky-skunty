@@ -21,6 +21,11 @@ Zero build step. Open `index.html` in a browser, or play the deployed copy.
 - `js/fps/aftermath.js` — the death sequence: the screen comes apart, two
   Matrix statements grow until they fill the screen, the old 2D tactics
   game comes back, and the first move you make in it inverts the colours.
+  Dying never returns you to the title: the first death restarts the trip
+  at round one, the second drops you into round two, the third back into
+  round one, and so on. Each rotation also rolls a 40% chance of running
+  the whole frame inverted for the length of the round — a held composite,
+  never a per-frame flicker, so it can't strobe.
 - `js/gfx/matrix.js` / `js/fps/tactics.js` — the falling-glyph renderer
   and the single-map skirmish board the death sequence drops you into.
 - `js/gfx/assets.js` — silent-fail loader for the real found-image/audio
