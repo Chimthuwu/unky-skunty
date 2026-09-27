@@ -1,5 +1,7 @@
 /* =============================================================
-   MAIN — bootstrap + game loop.
+   MAIN — bootstrap + game loop. Escape the Uncle is the only game
+   now; this just drives EscapeMode's update/draw + the fever
+   overlay every frame.
    ============================================================= */
 'use strict';
 
@@ -24,21 +26,13 @@
   fit();
 
   /* ---------- boot ---------- */
-  Game.screen = Screens.makeTitle();
-  Assets.init().then(() => {
-    CharArt.setImagePortrait('vosk', Assets.getImage('scunterGb'));
-    CharArt.setImageSprite('scunter', [Assets.getImage('scunterMapIdle'), Assets.getImage('scunterMapWalk')]);
-  });
+  Assets.init();
+  const screen = EscapeMode.make();
 
   /* first user gesture unlocks audio */
   const unlock = () => { if (Audio.init()) Audio.resume(); };
   window.addEventListener('keydown', unlock, { once: true });
   window.addEventListener('pointerdown', unlock, { once: true });
-
-  /* debug toggle */
-  window.addEventListener('keydown', (e) => {
-    if (e.key === '`') { e.preventDefault(); Debug.toggle(); }
-  });
 
   /* ---------- loop ---------- */
   let last = performance.now();
@@ -49,19 +43,11 @@
     Input.beginFrame(dt);
 
     try {
-      Debug.update(dt);
-      if (Game.state === 'chapter') {
-        Game.update(dt);
-        Game.draw(ctx);
-      } else if (Game.screen) {
-        Game.screen.update(dt);
-        Game.screen.draw(ctx);
-      }
-      Debug.draw(ctx);
+      screen.update(dt);
+      screen.draw(ctx);
       Fever.update(dt);
       Fever.drawOverlay(ctx);
     } catch (err) {
-      /* show errors on-screen instead of a black screen */
       console.error(err);
       ctx.fillStyle = '#200810';
       ctx.fillRect(0, 0, Config.SCREEN_W, Config.SCREEN_H);

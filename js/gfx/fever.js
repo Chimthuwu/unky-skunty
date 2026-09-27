@@ -14,7 +14,7 @@ const Fever = (() => {
   const INTRUSION_KEYS = [
     'intrusionSlime', 'intrusionTrain', 'intrusionStation',
     'intrusionDoor1', 'intrusionDoor2', 'intrusionWhite', 'intrusionPlayer',
-    'scunterHurt',
+    'scunterHurt', 'intrusionDoortex',
   ];
 
   function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }

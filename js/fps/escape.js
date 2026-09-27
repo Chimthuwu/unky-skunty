@@ -76,37 +76,57 @@ const EscapeMode = (() => {
   /* ---------------- factory ---------------- */
   function make() {
     const grid = buildMap();
-    let px = 2.5, py = 2.5, pa = 0.4;
+    let px, py, pa;
     const MOVE_SPD = 2.6, TURN_SPD = 2.6;
     const FOV = Math.PI / 2.6;
     const catchRadius = 0.55;
     const exitPos = { x: 21.5, y: 13.5 };
 
-    let uncle = { x: 12.5, y: 8.5, alert: 0, lastSeenX: 12.5, lastSeenY: 8.5 };
+    let uncle;
     const UNCLE_SPD = 2.15;
 
-    let bunnies = [
-      { x: 7.5, y: 3.5, dead: false, wobble: Math.random() * 10 },
-      { x: 18.5, y: 4.5, dead: false, wobble: Math.random() * 10 },
-      { x: 3.5, y: 11.5, dead: false, wobble: Math.random() * 10 },
-      { x: 13.5, y: 13.5, dead: false, wobble: Math.random() * 10 },
-      { x: 20.5, y: 10.5, dead: false, wobble: Math.random() * 10 },
-      { x: 9.5, y: 6.5, dead: false, wobble: Math.random() * 10 },
-    ];
+    let bunnies;
 
-    let state = 'intro';   /* intro | playing | caught | escaped */
+    function resetRun() {
+      px = 2.5; py = 2.5; pa = 0.4;
+      uncle = { x: 12.5, y: 8.5, alert: 0, lastSeenX: 12.5, lastSeenY: 8.5 };
+      bunnies = [
+        { x: 7.5, y: 3.5, dead: false, wobble: Math.random() * 10 },
+        { x: 18.5, y: 4.5, dead: false, wobble: Math.random() * 10 },
+        { x: 3.5, y: 11.5, dead: false, wobble: Math.random() * 10 },
+        { x: 13.5, y: 13.5, dead: false, wobble: Math.random() * 10 },
+        { x: 20.5, y: 10.5, dead: false, wobble: Math.random() * 10 },
+        { x: 9.5, y: 6.5, dead: false, wobble: Math.random() * 10 },
+      ];
+      bunniesSlain = 0;
+      shotFlash = 0;
+    }
+
+    let state = 'menu';   /* menu | playing | caught | escaped */
     let t = 0;
     let shotFlash = 0;
     let bunniesSlain = 0;
     let caughtT = 0;
     let camPlane; /* recomputed each frame from pa */
+    resetRun();
 
-    const introLines = [
-      'Somewhere in the walls, something with headphones is listening.',
-      'Uncle Scunter cannot be stopped. Only outrun — or lost.',
-      'His bunnies patrol the halls. They CAN be dealt with.',
-      'Find the exit. Do not let him catch you.',
+    /* fixed-looking but slightly-off ear positions poking in from the
+       menu's edges — deliberately "wrong", never symmetric */
+    const menuEars = [
+      { x: -6, y: 18, s: 30, rot: -0.5 },
+      { x: 246, y: 6, s: 22, rot: 2.6 },
+      { x: 60, y: -8, s: 26, rot: 0.15 },
+      { x: 210, y: 150, s: 20, rot: -2.3 },
+      { x: -4, y: 140, s: 24, rot: 0.9 },
     ];
+
+    /* how grey the menu goes — mostly 0, sharp brief spikes */
+    function desaturatePulse(time) {
+      const cycle = 6400;
+      const phase = (time % cycle) / cycle;
+      if (phase > 0.06) return 0;
+      return Math.sin((phase / 0.06) * Math.PI) * 92;
+    }
 
     function tryMove(nx, ny) {
       const r = 0.18;
@@ -168,18 +188,14 @@ const EscapeMode = (() => {
       t += dt;
       if (shotFlash > 0) shotFlash = Math.max(0, shotFlash - dt);
 
-      if (state === 'intro') {
-        if (Input.pressed('confirm') || Input.pressed('cancel')) state = 'playing';
+      if (state === 'menu') {
+        Audio.startMusic('boss');
+        if (Input.pressed('confirm') || Input.pressed('cancel')) { resetRun(); state = 'playing'; }
         return;
       }
-      if (state === 'caught') {
+      if (state === 'caught' || state === 'escaped') {
         caughtT += dt;
-        if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) Game.screen = Screens.makeTitle();
-        return;
-      }
-      if (state === 'escaped') {
-        caughtT += dt;
-        if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) Game.screen = Screens.makeTitle();
+        if (caughtT > 400 && (Input.pressed('confirm') || Input.pressed('cancel'))) state = 'menu';
         return;
       }
 
@@ -195,7 +211,6 @@ const EscapeMode = (() => {
 
       if (Math.hypot(uncle.x - px, uncle.y - py) < catchRadius) {
         state = 'caught'; caughtT = 0;
-        CharArt.setImagePortrait('vosk', Assets.getImage('scunterGbGlitch'));
         Assets.playSound('openFence', 0.5);
       }
       if (Math.hypot(exitPos.x - px, exitPos.y - py) < 0.7) {
@@ -276,33 +291,79 @@ const EscapeMode = (() => {
       g.fillRect(SW / 2 - 6, SH - 40, 12, 20);
     }
 
+    function drawBunnyEar(g, x, y, s, rot) {
+      g.save();
+      g.translate(x, y);
+      g.rotate(rot);
+      g.fillStyle = '#3a1428';
+      g.beginPath();
+      g.moveTo(-s * 0.22, 0); g.lineTo(s * 0.22, 0); g.lineTo(0, -s); g.closePath(); g.fill();
+      g.fillStyle = '#e888b0';
+      g.beginPath();
+      g.moveTo(-s * 0.12, -s * 0.08); g.lineTo(s * 0.12, -s * 0.08); g.lineTo(0, -s * 0.82); g.closePath(); g.fill();
+      g.restore();
+    }
+
+    function drawMenu(g) {
+      const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
+      const grey = desaturatePulse(t);
+      g.filter = grey > 1 ? `grayscale(${grey.toFixed(0)}%) contrast(1.15)` : 'none';
+
+      g.fillStyle = '#0a0710'; g.fillRect(0, 0, SW, SH);
+
+      const wallTex = Assets.getImage('wallTexture');
+      if (wallTex) {
+        g.save(); g.globalAlpha = 0.16; g.imageSmoothingEnabled = false;
+        for (let x = -20; x < SW; x += 48) g.drawImage(wallTex, x, 0, 48, SH);
+        g.restore();
+      }
+      const dream = Assets.getImage('feverdream');
+      if (dream) {
+        g.save();
+        g.globalAlpha = 0.20 + Math.sin(t / 500) * 0.06;
+        g.globalCompositeOperation = 'screen';
+        const scale = Math.max(SW / dream.width, SH / dream.height);
+        const dw = dream.width * scale, dh = dream.height * scale;
+        g.drawImage(dream, (SW - dw) / 2, (SH - dh) / 2, dw, dh);
+        g.restore();
+      }
+
+      /* ears poking in from "wrong" places */
+      for (const e of menuEars) drawBunnyEar(g, e.x, e.y + Math.sin(t / 900 + e.x) * 2, e.s, e.rot);
+
+      /* static noise speckle */
+      for (let i = 0; i < 40; i++) {
+        g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.10)';
+        g.fillRect(Math.random() * SW, Math.random() * SH, 1, 1);
+      }
+
+      const jitterX = (Math.sin(t / 47) > 0.9) ? (Math.random() * 4 - 2) : 0;
+      const titleCol = (Math.floor(t / 90) % 13 === 0) ? '#f83050' : '#e88090';
+      Font.drawCentered(g, 'ESCAPE', SW / 2 + jitterX, 22, titleCol, 2);
+      Font.drawCentered(g, 'THE UNCLE', SW / 2 - jitterX, 42, titleCol, 2);
+
+      const lines = [
+        'he listens from inside the walls',
+        'he cannot be stopped, only outrun',
+        'his bunnies CAN be dealt with',
+      ];
+      lines.forEach((line, i) => Font.drawCentered(g, line, SW / 2, 80 + i * 11, '#a898b8'));
+
+      if (Math.floor(t / 400) % 2 === 0) Font.drawCentered(g, 'Z / ENTER TO BEGIN', SW / 2, SH - 16, '#e8c850');
+
+      g.filter = 'none';
+    }
+
     function draw(g) {
       const SW = Config.SCREEN_W, SH = Config.SCREEN_H;
       camPlaneX = -Math.sin(pa) * Math.tan(FOV / 2);
       camPlaneY = Math.cos(pa) * Math.tan(FOV / 2);
 
-      if (state === 'intro') {
-        g.fillStyle = '#0a0810'; g.fillRect(0, 0, SW, SH);
-        Font.drawCentered(g, 'ESCAPE THE UNCLE', SW / 2, 20, '#e88090', 2);
-        const idx = Math.min(introLines.length - 1, Math.floor(t / 1800));
-        introLines.slice(0, idx + 1).forEach((line, i) => {
-          let yy = 50 + i * 22, xx = 12;
-          const words = line.split(' '); let cur = '';
-          for (const w of words) {
-            const test = cur ? cur + ' ' + w : w;
-            if (Font.width(test) > SW - 24) { Font.draw(g, cur, xx, yy, '#c8b8d8'); cur = w; yy += 9; }
-            else cur = test;
-          }
-          if (cur) Font.draw(g, cur, xx, yy, '#c8b8d8');
-        });
-        if (idx >= introLines.length - 1) Font.drawCentered(g, 'Z / ENTER TO BEGIN', SW / 2, SH - 14, '#e8c850');
-        return;
-      }
+      if (state === 'menu') { drawMenu(g); return; }
 
       drawScene(g);
 
       /* HUD */
-      UI.window ? null : null;
       g.fillStyle = 'rgba(10,8,16,0.55)';
       g.fillRect(0, SH - 12, SW, 12);
       Font.draw(g, 'BUNNIES: ' + bunniesSlain, 4, SH - 9, '#e8b0c8');

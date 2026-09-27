@@ -20,6 +20,8 @@ const Assets = (() => {
     scunterMapWalk: 'js/assets/img/scunter_map_walk.png',
     scunterHurt: 'js/assets/img/scunter_hurt_front.png',
     scunterVictory: 'js/assets/img/scunter_victory_front.png',
+    wallTexture: 'js/assets/img/wall_texture.png',
+    intrusionDoortex: 'js/assets/img/intrusion_doortex.png',
     intrusionSlime: 'js/assets/img/intrusion_slime.png',
     intrusionTrain: 'js/assets/img/intrusion_train.png',
     intrusionStation: 'js/assets/img/intrusion_station.png',
